@@ -17,18 +17,18 @@ pub const DecodeError = error{
 /// contents of the TokenIterator, and each Token returned by it.
 pub fn LineIterator(Reader: type) type {
     return struct {
-        buf: [4096]u8,
         read: Reader,
+        buf: [4096]u8 = undefined,
 
         pub const LineIter = @This();
 
-        pub fn next(iter: *LineIter) !?[]const u8 {
+        pub fn next(iter: *LineIter) !?TokenIterator {
             while (try iter.read.readUntilDelimiterOrEof(&iter.buf, '\n')) |line| {
                 if (line.len == 0 or line[0] == '#') continue;
                 return if (std.mem.indexOfScalar(u8, line, '#')) |hash|
-                    line[0..hash]
+                    .{ .line = line[0..hash] }
                 else
-                    line;
+                    .{ .line = line };
             }
             return null;
         }
@@ -78,7 +78,7 @@ pub const TokenIterator = struct {
                     contents = true;
                 },
                 '.' => {
-                    assert(iter.idx + 1 < iter.len and iter.line[iter.idx + 1] == '.');
+                    assert(iter.idx + 1 < iter.line.len and iter.line[iter.idx + 1] == '.');
                     range = true;
                     iter.idx += 1;
                 },
@@ -144,11 +144,11 @@ pub const TokenKind = enum(u3) {
 pub const Point = struct {
     slice: []const u8,
 
-    pub fn append(point: *Point, allocator: Allocator, list: TextList) DecodeError!void {
+    pub fn append(point: Point, allocator: Allocator, list: *TextList) DecodeError!void {
         var buf: [4]u8 = undefined;
         // If this fails we can act accordingly:
         assert(point.slice[0] != ' ');
-        const utf8 = try encodeOne(&buf, point.slice);
+        const utf8 = try encodeOne(buf[0..4], point.slice);
         try list.appendSlice(allocator, utf8);
     }
 };
@@ -159,10 +159,7 @@ fn encodeOne(buf: []u8, slice: []const u8) error{TokenProblem}![]const u8 {
     const codepoint = std.fmt.parseInt(u21, slice[0..idx], 16) catch {
         return error.TokenProblem;
     };
-    const len = std.unicode.utf8CodepointSequenceLength(codepoint) catch {
-        return error.TokenProblem;
-    };
-    std.unicode.utf8Encode(codepoint, &buf) catch {
+    const len = std.unicode.wtf8Encode(codepoint, buf) catch {
         return error.TokenProblem;
     };
     return buf[0..len];
@@ -171,28 +168,25 @@ fn encodeOne(buf: []u8, slice: []const u8) error{TokenProblem}![]const u8 {
 pub const Range = struct {
     slice: []const u8,
 
-    pub fn append(point: *Range, allocator: Allocator, list: TextList) DecodeError!void {
+    pub fn append(range: Range, allocator: Allocator, list: *TextList) DecodeError!void {
         var buf: [4]u8 = undefined;
         var idx: usize = 0;
-        while (std.ascii.isHex(point.slice[idx])) : (idx += 1) {}
-        const start = std.fmt.parseInt(u21, point.slice[0..idx], 16) catch {
+        while (std.ascii.isHex(range.slice[idx])) : (idx += 1) {}
+        const start = std.fmt.parseInt(u21, range.slice[0..idx], 16) catch {
             return error.TokenProblem;
         };
-        assert(point.slice[idx] == '.');
+        assert(range.slice[idx] == '.');
         idx += 1;
-        assert(point.slice[idx] == '.');
+        assert(range.slice[idx] == '.');
         idx += 1;
         const two = idx;
-        while (std.ascii.isHex(point.slice[idx])) : (idx += 1) {}
-        const end = std.fmt.parseInt(u21, point.slice[two..idx], 16) catch {
+        while (idx < range.slice.len and std.ascii.isHex(range.slice[idx])) : (idx += 1) {}
+        const end = std.fmt.parseInt(u21, range.slice[two..idx], 16) catch {
             return error.TokenProblem;
         };
         for (start..end) |cp_usize| {
             const codepoint: u21 = @intCast(cp_usize);
-            const len = std.unicode.utf8CodepointSequenceLength(codepoint) catch {
-                return error.TokenProblem;
-            };
-            std.unicode.utf8Encode(codepoint, &buf) catch {
+            const len = std.unicode.wtf8Encode(codepoint, &buf) catch {
                 return error.TokenProblem;
             };
             try list.appendSlice(allocator, buf[0..len]);
@@ -202,12 +196,20 @@ pub const Range = struct {
 
 pub const Label = struct {
     slice: []const u8,
+
+    pub fn value(label: Label) []const u8 {
+        var start: usize = 0;
+        while (label.slice[start] == ' ') : (start += 1) {}
+        var end = start;
+        while (end < label.slice.len and std.ascii.isAlphabetic(label.slice[end])) : (end += 1) {}
+        return label.slice[start..end];
+    }
 };
 
 pub const Sequence = struct {
     slice: []const u8,
 
-    pub fn append(seq: *Sequence, allocator: Allocator, list: *TextList) !void {
+    pub fn append(seq: Sequence, allocator: Allocator, list: *TextList) !void {
         var iter = std.mem.splitScalar(u8, seq.slice, ' ');
         var buf: [4]u8 = undefined;
         while (iter.next()) |tok| {
@@ -222,9 +224,29 @@ pub const LabelSet = struct {
     slice: []const u8,
 };
 
+pub const StringMap = struct {
+    allocator: Allocator,
+    map: StringHash = .empty,
+
+    pub fn get(str_map: *StringMap, key: []const u8) !*TextList {
+        if (str_map.map.getPtr(key)) |ptr| {
+            return ptr;
+        }
+        const key_clone = try str_map.allocator.dupe(u8, key);
+        const new_map: TextList = .empty;
+        try str_map.map.put(str_map.allocator, key_clone, new_map);
+        return str_map.map.getPtr(key).?;
+    }
+
+    pub fn iterator(str_map: *StringMap) StringHash.Iterator {
+        return str_map.map.iterator();
+    }
+};
+
 // TODO: Write unicoder out of runeset and use that instead of std.unicode
 
 const std = @import("std");
 const assert = std.debug.assert;
-const TextList = std.ArrayListAlignedUnmanaged(u8);
+const TextList = std.ArrayListUnmanaged(u8);
 const Allocator = std.mem.Allocator;
+const StringHash = std.StringHashMapUnmanaged(TextList);

@@ -1,29 +1,33 @@
 const std = @import("std");
 
-// Although this function looks imperative, note that its job is to
-// declaratively construct a build graph that will be executed by an external
-// runner.
 pub fn build(b: *std.Build) void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
 
-    // Standard optimization options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
-    // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    // Export as module to be available for @import("runicode") on user site
+    // String generation
+
+    const gen_cat_str_exe = b.addExecutable(.{
+        .name = "gen_cat",
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("src/gen/gen_cat_string.zig"),
+    });
+
+    b.installArtifact(gen_cat_str_exe);
+
+    const run_gencatstr = b.addRunArtifact(gen_cat_str_exe);
+
+    const run_gencat_step = b.step("gen-cat-str", "generate strings namespace for General Categories");
+
+    run_gencat_step.dependOn(&run_gencatstr.step);
+
     _ = b.addModule("runicode", .{
         .root_source_file = b.path("src/runicode.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    // Creates a step for unit testing. This only builds the test executable
-    // but does not run it.
     const lib_unit_tests = b.addTest(.{
         .root_source_file = b.path("src/runicode.zig"),
         .target = target,
@@ -32,9 +36,6 @@ pub fn build(b: *std.Build) void {
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
-    // Similar to creating the run step earlier, this exposes a `test` step to
-    // the `zig build --help` menu, providing a way for the user to request
-    // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
 }
