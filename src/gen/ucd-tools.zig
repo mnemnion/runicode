@@ -5,6 +5,16 @@
 //! With various inspirations and borrowings from zg.
 //!
 
+// Forward-import ezcaper module
+
+pub const ezcaper = @import("ezcaper");
+
+const esc_string = ezcaper.escStringExact;
+
+pub fn ltString(_: void, l: []const u8, r: []const u8) bool {
+    return std.mem.order(u8, l, r) == .lt;
+}
+
 // TODO: At least the GraphemeTest.txt file has lines which I suspect are
 // longer than 4k.  Let's keep that in mind.
 
@@ -240,6 +250,31 @@ pub const StringMap = struct {
 
     pub fn iterator(str_map: *StringMap) StringHash.Iterator {
         return str_map.map.iterator();
+    }
+
+    /// Allocates and returns a slice with the map's keys sorted in
+    /// lexicographical order. In intended use the arena frees this
+    /// allocation.
+    pub fn sortedKeys(str_map: *StringMap) ![][]const u8 {
+        var sorted_keys = try str_map.allocator.alloc([]const u8, str_map.map.count());
+        {
+            var key_iter = str_map.map.keyIterator();
+            var idx: usize = 0;
+            while (key_iter.next()) |key| : (idx += 1) {
+                sorted_keys[idx] = key.*;
+            }
+            std.mem.sort([]const u8, sorted_keys, {}, ltString);
+        }
+        return sorted_keys;
+    }
+
+    const FmtOps = std.fmt.FormatOptions;
+
+    pub fn format(str_map: *StringMap, _: []const u8, _: FmtOps, writer: anytype) !void {
+        var iter = str_map.iterator();
+        while (iter.next()) |entry| {
+            try writer.print("pub const {s} = {};\n\n", .{ entry.key_ptr.*, esc_string(entry.value_ptr.items) });
+        }
     }
 };
 

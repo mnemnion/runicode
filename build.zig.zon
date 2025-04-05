@@ -16,10 +16,11 @@
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
     .dependencies = .{
-        //
+        .ezcaper = .{
+            .url = "https://github.com/mnemnion/ezcaper/archive/refs/tags/v0.2.0.tar.gz",
+            .hash = "ezcaper-0.0.1-kd9_iT6TAADzqwCXzhZVnTDYs95bSQfGX6YDP6LyLF9W",
+        },
     },
-
-    // Specifies the set of files and directories that are included in this package.
     .paths = .{
         "build.zig",
         "build.zig.zon",

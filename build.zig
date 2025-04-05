@@ -5,6 +5,20 @@ pub fn build(b: *std.Build) void {
 
     const optimize = b.standardOptimizeOption(.{});
 
+    // Tool module for internal use
+    const tool_mod = b.addModule("ucd_tools", .{
+        .root_source_file = b.path("src/gen/ucd-tools.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const ezcaper_dep = b.dependency("ezcaper", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    tool_mod.addImport("ezcaper", ezcaper_dep.module("ezcaper"));
+
     // String generation
 
     const gen_cat_str_exe = b.addExecutable(.{
@@ -13,6 +27,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .root_source_file = b.path("src/gen/gen_cat_string.zig"),
     });
+
+    gen_cat_str_exe.root_module.addImport("ucd-tools", tool_mod);
 
     b.installArtifact(gen_cat_str_exe);
 
