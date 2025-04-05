@@ -1,0 +1,6 @@
+//! Generated source!
+//! Do not modify!
+
+const RuneSet = @import("runeset").runeset;
+
+pub const Pc = RuneSet{ .body = &.{ 0x0, 0x80000000, 0x800400000000, 0x0, 0x3, 0x1300000000000000, 0x8000000000000000, 0x6000, 0x8000000000000, 0x100000, 0x8000000000000000 } };
