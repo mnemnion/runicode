@@ -5,11 +5,17 @@
 //! With various inspirations and borrowings from zg.
 //!
 
-// Forward-import ezcaper module
+// Forward-import ezcaper and runeset modules
 
 pub const ezcaper = @import("ezcaper");
 
 const esc_string = ezcaper.escStringExact;
+
+pub const runeset = @import("runeset");
+
+const RuneSet = runeset.RuneSet;
+
+pub const RuneMap = std.StringHashMapUnmanaged(RuneSet);
 
 pub fn ltString(_: void, l: []const u8, r: []const u8) bool {
     return std.mem.order(u8, l, r) == .lt;
@@ -93,11 +99,10 @@ pub const TokenIterator = struct {
                     iter.idx += 1;
                 },
                 ';' => {
-                    iter.idx += 1;
                     break :scan;
                 },
                 else => {
-                    assert(std.ascii.isAlphabetic(b));
+                    assert(std.ascii.isAlphabetic(b) or b == '_');
                     if (separator) {
                         more_contents = true;
                     }
@@ -106,7 +111,10 @@ pub const TokenIterator = struct {
                 },
             }
         }
-        const stop: usize = if (iter.idx == 0) 0 else iter.idx - 1;
+        const stop: usize = if (iter.idx == 0) 0 else iter.idx;
+        if (iter.idx < iter.line.len and iter.line[iter.idx] == ';') {
+            iter.idx += 1;
+        }
         iter.col += 1;
         // Handle trailing space in next field optimistically
         // (if I'm right, this obviates 'contents').
@@ -208,11 +216,7 @@ pub const Label = struct {
     slice: []const u8,
 
     pub fn value(label: Label) []const u8 {
-        var start: usize = 0;
-        while (label.slice[start] == ' ') : (start += 1) {}
-        var end = start;
-        while (end < label.slice.len and std.ascii.isAlphabetic(label.slice[end])) : (end += 1) {}
-        return label.slice[start..end];
+        return std.mem.trim(u8, label.slice, " ");
     }
 };
 
@@ -232,6 +236,10 @@ pub const Sequence = struct {
 
 pub const LabelSet = struct {
     slice: []const u8,
+
+    pub fn iterator(ls: *LabelSet) std.mem.TokenIterator(u8, .scalar) {
+        return std.mem.tokenizeScalar(u8, ls.slice, ' ');
+    }
 };
 
 pub const StringMap = struct {

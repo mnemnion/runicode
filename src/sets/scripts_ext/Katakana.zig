@@ -1,0 +1,6 @@
+//! Generated source!
+//! Do not modify!
+
+const RuneSet = @import("runeset").runeset;
+
+pub const Katakana = RuneSet{ .body = &.{ 0x0, 0x0, 0x1800800001000, 0x14, 0x800000020, 0x388d, 0x6200000000000000, 0xc000000, 0x31, 0x8000000000000000, 0x5fffffff, 0xffff7fde00000000, 0x20, 0x7fffff, 0xffffffffffffffff, 0x3fffffffffff0000, 0x7fff000000000000, 0xbbffffffffffffff, 0xffffffff0a000000, 0x309f00007ffbff0e, 0x1, 0x300000000, 0x7000200000, 0x27e7000000000000 } };

@@ -1,0 +1,6 @@
+//! Generated source!
+//! Do not modify!
+
+const RuneSet = @import("runeset").runeset;
+
+pub const Cyrillic = RuneSet{ .body = &.{ 0x0, 0x0, 0x18406001f0000, 0x16, 0xffffffffffffffff, 0xffffffffffffffff, 0xfffffffffffffd8d, 0xffffffffffffffff, 0x7fffffffffff, 0x34000000000000, 0x80000000000000, 0x6000000, 0x100000000000000, 0x40000000, 0x7, 0x400000000000, 0x57ffffff, 0xdffbdfffffffffff, 0x7fffffff00000000, 0x100000000000000, 0x80000000000, 0x3ff, 0xffff000000000000, 0x1fffffffffff, 0x8000 } };

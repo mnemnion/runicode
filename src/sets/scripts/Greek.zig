@@ -1,0 +1,6 @@
+//! Generated source!
+//! Do not modify!
+
+const RuneSet = @import("runeset").runeset;
+
+pub const Greek = RuneSet{ .body = &.{ 0x0, 0x0, 0x104060000e000, 0x16, 0x9c67000000000000, 0xfffffff9ffffd350, 0x7fdf0001ffffffff, 0xf070000000000000, 0x10, 0x200000000000, 0x20010000, 0x300, 0x60, 0x2000000000, 0x4000000000, 0x2fcc6fff67c76fcd, 0xefcfffffffffffff, 0x1fffffffaa7f1f1f, 0xffffffff1f1fffff, 0x8000000000000000, 0x3c1e0000000, 0x3c000000000, 0xffffffffffffffff, 0x2d, 0xfeefffffffffffff, 0x1000035ff } };
