@@ -18,6 +18,8 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
+    const property_map = try tools.propertyMap(allocator);
+    _ = property_map;
     var string_map: StringMap = .{ .allocator = allocator };
 
     {
@@ -34,7 +36,7 @@ pub fn main() !void {
             const cat = cat_token.value();
             const list = try string_map.get(cat);
             switch (first) {
-                .label, .none, .sequence, .label_set => unreachable,
+                .label, .none, .number, .sequence, .label_set => unreachable,
                 .point => |pt| {
                     try pt.append(allocator, list);
                 },
@@ -157,7 +159,7 @@ pub fn main() !void {
                     if (maybe_long_label) |long_label| {
                         const list = try string_map.get(long_label);
                         switch (first) {
-                            .label, .none, .sequence, .label_set => unreachable,
+                            .label, .none, .number, .sequence, .label_set => unreachable,
                             .point => |pt| {
                                 try pt.append(allocator, list);
                             },
@@ -178,7 +180,7 @@ pub fn main() !void {
                         if (maybe_long_label) |long_label| {
                             const list = try string_map.get(long_label);
                             switch (first) {
-                                .label, .none, .sequence, .label_set => unreachable,
+                                .label, .none, .number, .sequence, .label_set => unreachable,
                                 .point => |pt| {
                                     try pt.append(allocator, list);
                                 },

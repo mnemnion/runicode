@@ -21,7 +21,10 @@ pub fn ltString(_: void, l: []const u8, r: []const u8) bool {
     return std.mem.order(u8, l, r) == .lt;
 }
 
-// TODO: At least the GraphemeTest.txt file has lines which I suspect are
+// TODO: A data structure for PropertyValueAliases, it's going to get used
+// in a lot of places.
+
+// NOTE: At least the GraphemeTest.txt file has lines which I suspect are
 // longer than 4k.  Let's keep that in mind.
 
 pub const DecodeError = error{
@@ -35,11 +38,12 @@ pub fn LineIterator(Reader: type) type {
     return struct {
         read: Reader,
         buf: [4096]u8 = undefined,
-
+        line: usize = 0,
         pub const LineIter = @This();
 
         pub fn next(iter: *LineIter) !?TokenIterator {
             while (try iter.read.readUntilDelimiterOrEof(&iter.buf, '\n')) |line| {
+                iter.line += 1;
                 if (line.len == 0 or line[0] == '#') continue;
                 return if (std.mem.indexOfScalar(u8, line, '#')) |hash|
                     .{ .line = line[0..hash] }
@@ -94,15 +98,23 @@ pub const TokenIterator = struct {
                     contents = true;
                 },
                 '.' => {
-                    assert(iter.idx + 1 < iter.line.len and iter.line[iter.idx + 1] == '.');
-                    range = true;
-                    iter.idx += 1;
+                    if (iter.idx + 1 < iter.line.len and iter.line[iter.idx + 1] == '.') {
+                        range = true;
+                        iter.idx += 1;
+                    }
                 },
                 ';' => {
                     break :scan;
                 },
+                '-' => {
+                    // right now we don't want these
+                    while (iter.idx < iter.line.len and iter.line[iter.idx] != ';') : (iter.idx += 1) {}
+                    return .none;
+                },
                 else => {
-                    assert(std.ascii.isAlphabetic(b) or b == '_');
+                    if (!(std.ascii.isAlphabetic(b) or b == '_')) {
+                        std.debug.panic("unexpected byte {u} {d}", .{ b, b });
+                    }
                     if (separator) {
                         more_contents = true;
                     }
@@ -134,7 +146,11 @@ pub const TokenIterator = struct {
             if (more_contents) {
                 return .{ .sequence = .{ .slice = slice } };
             } else {
-                return .{ .point = .{ .slice = slice } };
+                // Problem token: F
+                if (std.mem.trim(u8, slice, " ").len >= 4)
+                    return .{ .point = .{ .slice = slice } }
+                else
+                    return .{ .label = .{ .slice = slice } };
             }
         }
         unreachable;
@@ -144,19 +160,37 @@ pub const TokenIterator = struct {
 pub const Token = union(TokenKind) {
     none: void,
     point: Point,
+    number: Number,
     range: Range,
     label: Label,
     sequence: Sequence,
     label_set: LabelSet,
+
+    pub fn format(token: Token, _: []const u8, _: FmtOps, writer: anytype) !void {
+        switch (token) {
+            .none => try writer.writeAll(".none"),
+            .point => |p| try writer.print(".point = {s}", .{p.slice}),
+            .number => |n| try writer.print(".point = {s}", .{n.slice}),
+            .range => |r| try writer.print(".range = {s}", .{r.slice}),
+            .label => |l| try writer.print(".range = {s}", .{l.slice}),
+            .sequence => |s| try writer.print(".range = {s}", .{s.slice}),
+            .label_set => |ls| try writer.print(".range = {s}", .{ls.slice}),
+        }
+    }
 };
 
 pub const TokenKind = enum(u3) {
     none,
     point,
+    number,
     range,
     label,
     sequence,
     label_set,
+};
+
+pub const Number = struct {
+    slice: []const u8,
 };
 
 pub const Point = struct {
@@ -276,8 +310,6 @@ pub const StringMap = struct {
         return sorted_keys;
     }
 
-    const FmtOps = std.fmt.FormatOptions;
-
     pub fn format(str_map: *StringMap, _: []const u8, _: FmtOps, writer: anytype) !void {
         var iter = str_map.iterator();
         while (iter.next()) |entry| {
@@ -286,10 +318,91 @@ pub const StringMap = struct {
     }
 };
 
+const Alias = union(enum) {
+    alias: []const u8,
+    aliases: [][]const u8,
+};
+
+const AliasMap = std.StringHashMapUnmanaged(Alias);
+
+pub const PropertyMap = std.StringHashMapUnmanaged(AliasMap);
+
+pub fn propertyMap(allocator: Allocator) !PropertyMap {
+    var prop_map: PropertyMap = .empty;
+    var this_property: []const u8 = "";
+    var alias_map: *AliasMap = undefined;
+    {
+        var in_file = try std.fs.cwd().openFile("UCD/PropertyValueAliases.txt", .{});
+        defer in_file.close();
+        var in_buf = std.io.bufferedReader(in_file.reader());
+        const in_reader = in_buf.reader();
+        var line_iter: LineIterator(@TypeOf(in_reader)) = .{ .read = in_reader };
+        scan: while (try line_iter.next()) |tok_iter_const| {
+            var tok_iter = tok_iter_const;
+            const prop_name = tok_iter.next().?;
+            switch (prop_name) {
+                .label => |l| {
+                    // Skip classes with numeric data (for now at least)
+                    const property = l.value();
+                    if (std.mem.eql(u8, "ccc", property) or
+                        std.mem.eql(u8, "age", property)) continue :scan;
+
+                    if (!std.mem.eql(u8, l.value(), this_property)) {
+                        this_property = try allocator.dupe(u8, property);
+                        try prop_map.put(allocator, this_property, .empty);
+                        alias_map = prop_map.getPtr(this_property).?;
+                    }
+                    const short_name = try allocator.dupe(u8, tok_iter.next().?.label.value());
+                    const long_token = tok_iter.next().?.label;
+                    if (tok_iter.next()) |alias| {
+                        const first_alias = try allocator.dupe(u8, long_token.value());
+                        if (alias != .label) {
+                            // This weirdness handles a hyphen in an extra property, which we don't need
+                            // or want
+                            if (alias == .none) {
+                                const long_name = try allocator.dupe(u8, long_token.value());
+                                try alias_map.put(allocator, short_name, .{ .alias = long_name });
+                                continue :scan;
+                            }
+
+                            std.debug.panic("Unexpected {s} {} on line {d}\n{s}\n", .{
+                                @tagName(alias),
+                                alias,
+                                line_iter.line,
+                                tok_iter.line,
+                            });
+                        }
+                        const second_alias = try allocator.dupe(u8, alias.label.value());
+                        var aliases_list: AliasesList = .empty;
+                        try aliases_list.ensureTotalCapacity(allocator, 2);
+                        aliases_list.appendAssumeCapacity(first_alias);
+                        aliases_list.appendAssumeCapacity(second_alias);
+                        while (tok_iter.next()) |next_token| {
+                            const next_alias = try allocator.dupe(u8, next_token.label.value());
+                            try aliases_list.append(allocator, next_alias);
+                        }
+                        const aliases = aliases_list.items;
+                        try alias_map.put(allocator, short_name, .{ .aliases = aliases });
+                    } else {
+                        const long_name = try allocator.dupe(u8, long_token.value());
+                        try alias_map.put(allocator, short_name, .{ .alias = long_name });
+                    }
+                },
+                inline else => |_, tag| {
+                    std.debug.panic("Invalid {s} at line {d}\n", .{ @tagName(tag), line_iter.line });
+                },
+            }
+        }
+    }
+    return prop_map;
+}
+
 // TODO: Write unicoder out of runeset and use that instead of std.unicode
 
 const std = @import("std");
 const assert = std.debug.assert;
 const TextList = std.ArrayListUnmanaged(u8);
+const AliasesList = std.ArrayListUnmanaged([]const u8);
 const Allocator = std.mem.Allocator;
 const StringHash = std.StringHashMapUnmanaged(TextList);
+const FmtOps = std.fmt.FormatOptions;

@@ -69,6 +69,25 @@ pub fn build(b: *std.Build) void {
 
     run_scripts_step.dependOn(&run_scripts.step);
 
+    // Core Properties
+
+    const props_exe = b.addExecutable(.{
+        .name = "props",
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("src/gen/props.zig"),
+    });
+
+    props_exe.root_module.addImport("ucd-tools", tool_mod);
+
+    b.installArtifact(props_exe);
+
+    const run_props = b.addRunArtifact(props_exe);
+
+    const run_props_step = b.step("props", "generate files for Properties");
+
+    run_props_step.dependOn(&run_props.step);
+
     // Outward-facing Modules
 
     _ = b.addModule("runicode", .{

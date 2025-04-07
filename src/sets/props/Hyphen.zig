@@ -1,0 +1,6 @@
+//! Generated source!
+//! Do not modify!
+
+const RuneSet = @import("runeset").runeset;
+
+pub const Hyphen = RuneSet{ .body = &.{ 0x35184372088832, 0x0, 0x800e00400004, 0x0, 0x200000000000, 0x400, 0x100000000, 0x100000000000001, 0x8, 0x3200000000000000, 0x2000000000, 0x2000, 0x800000000, 0x800000000000000, 0x800000, 0x10000, 0x40 } };
