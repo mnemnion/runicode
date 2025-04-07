@@ -29,6 +29,18 @@ pub const Deprecated = @import("props/Deprecated.zig").Deprecated;
 
 pub const Diacritic = @import("props/Diacritic.zig").Diacritic;
 
+pub const Emoji = @import("props/Emoji.zig").Emoji;
+
+pub const Emoji_Component = @import("props/Emoji_Component.zig").Emoji_Component;
+
+pub const Emoji_Modifier = @import("props/Emoji_Modifier.zig").Emoji_Modifier;
+
+pub const Emoji_Modifier_Base = @import("props/Emoji_Modifier_Base.zig").Emoji_Modifier_Base;
+
+pub const Emoji_Presentation = @import("props/Emoji_Presentation.zig").Emoji_Presentation;
+
+pub const Extended_Pictographic = @import("props/Extended_Pictographic.zig").Extended_Pictographic;
+
 pub const Extender = @import("props/Extender.zig").Extender;
 
 pub const Grapheme_Base = @import("props/Grapheme_Base.zig").Grapheme_Base;

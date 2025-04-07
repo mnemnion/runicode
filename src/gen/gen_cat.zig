@@ -35,7 +35,7 @@ pub fn main() !void {
         const cat = cat_token.value();
         const list = try string_map.get(cat);
         switch (first) {
-            .label, .none, .sequence, .label_set => unreachable,
+            .label, .none, .number, .sequence, .label_set => unreachable,
             .point => |pt| {
                 try pt.append(allocator, list);
             },
@@ -46,6 +46,8 @@ pub fn main() !void {
     }
     const sorted_keys = try string_map.sortedKeys();
     var path_list: TextList = TextList.init(allocator);
+    const props_map = try tools.propertyMap(allocator);
+    const gc_map = props_map.get("gc").?;
     // Write strings files
     {
         const main_file = try std.fs.cwd()
@@ -55,10 +57,29 @@ pub fn main() !void {
         try main_write.writeAll(header_txt);
         for (sorted_keys) |key| {
             try main_write.print(
-                \\pub const {s} = @import("./gencat/{s}.zig").{s};
+                \\pub const {s} = @import("gencat/{s}.zig").{s};
                 \\
                 \\
             , .{ key, key, key });
+            const other_names = gc_map.get(key).?;
+            switch (other_names) {
+                .alias => |alias| {
+                    try main_write.print(
+                        \\pub const {s} = {s};
+                        \\
+                        \\
+                    , .{ alias, key });
+                },
+                .aliases => |aliases| {
+                    for (aliases) |alias| {
+                        try main_write.print(
+                            \\pub const {s} = {s};
+                            \\
+                            \\
+                        , .{ alias, key });
+                    }
+                },
+            }
             const str = (try string_map.get(key)).items;
             var str_file = try std.fs.cwd()
                 .createFile(try srcPath(&path_list, "src/strs/gencat/", key), .{ .lock = .exclusive });
@@ -87,10 +108,29 @@ pub fn main() !void {
 
         for (sorted_keys) |key| {
             try main_write.print(
-                \\pub const {s} = @import("./gencat/{s}.zig").{s};
+                \\pub const {s} = @import("gencat/{s}.zig").{s};
                 \\
                 \\
             , .{ key, key, key });
+            const other_names = gc_map.get(key).?;
+            switch (other_names) {
+                .alias => |alias| {
+                    try main_write.print(
+                        \\pub const {s} = {s};
+                        \\
+                        \\
+                    , .{ alias, key });
+                },
+                .aliases => |aliases| {
+                    for (aliases) |alias| {
+                        try main_write.print(
+                            \\pub const {s} = {s};
+                            \\
+                            \\
+                        , .{ alias, key });
+                    }
+                },
+            }
             const rune = rune_map.get(key).?;
             var str_file = try std.fs.cwd()
                 .createFile(try srcPath(&path_list, "src/sets/gencat/", key), .{ .lock = .exclusive });

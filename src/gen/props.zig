@@ -38,7 +38,7 @@ pub fn main() !void {
             const cat = cat_token.value();
             const list = try string_map.get(cat);
             switch (first) {
-                .label, .none, .sequence, .label_set => unreachable,
+                .label, .number, .none, .sequence, .label_set => unreachable,
                 .point => |pt| {
                     try pt.append(allocator, list);
                 },
@@ -71,7 +71,7 @@ pub fn main() !void {
             const cat = cat_token.value();
             const list = try string_map.get(cat);
             switch (first) {
-                .label, .none, .sequence, .label_set => unreachable,
+                .label, .number, .none, .sequence, .label_set => unreachable,
                 .point => |pt| {
                     try pt.append(allocator, list);
                 },
@@ -81,6 +81,36 @@ pub fn main() !void {
             }
         }
     }
+
+    {
+        var in_file = try std.fs.cwd().openFile("UCD/emoji/emoji-data.txt", .{});
+        defer in_file.close();
+        var in_buf = std.io.bufferedReader(in_file.reader());
+        const in_reader = in_buf.reader();
+        var line_iter: LineIterator(@TypeOf(in_reader)) = .{ .read = in_reader };
+        while (try line_iter.next()) |tok_iter_const| {
+            var tok_iter = tok_iter_const;
+            const first = tok_iter.next().?;
+            const cat_token = tok_iter.next().?.label;
+            if (tok_iter.next()) |tok| {
+                // TODO: These are all Indian Conjunt Break InCB, the important classifier is
+                // this third category.  Let's do something about it...
+                _ = tok;
+            }
+            const cat = cat_token.value();
+            const list = try string_map.get(cat);
+            switch (first) {
+                .label, .number, .none, .sequence, .label_set => unreachable,
+                .point => |pt| {
+                    try pt.append(allocator, list);
+                },
+                .range => |r| {
+                    try r.append(allocator, list);
+                },
+            }
+        }
+    }
+
     const sorted_keys = try string_map.sortedKeys();
     var path_list: TextList = TextList.init(allocator);
     // Write strings files
