@@ -35,7 +35,7 @@ pub fn main() !void {
         const cat = cat_token.value();
         const list = try string_map.get(cat);
         switch (first) {
-            .label, .none, .number, .sequence, .label_set => unreachable,
+            .label, .hyphenated, .none, .number, .sequence, .label_set => unreachable,
             .point => |pt| {
                 try pt.append(allocator, list);
             },

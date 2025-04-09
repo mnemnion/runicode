@@ -38,7 +38,7 @@ pub fn main() !void {
             const cat = cat_token.value();
             const list = try string_map.get(cat);
             switch (first) {
-                .label, .number, .none, .sequence, .label_set => unreachable,
+                .label, .hyphenated, .number, .none, .sequence, .label_set => unreachable,
                 .point => |pt| {
                     try pt.append(allocator, list);
                 },
@@ -71,7 +71,7 @@ pub fn main() !void {
             const cat = cat_token.value();
             const list = try string_map.get(cat);
             switch (first) {
-                .label, .number, .none, .sequence, .label_set => unreachable,
+                .label, .hyphenated, .number, .none, .sequence, .label_set => unreachable,
                 .point => |pt| {
                     try pt.append(allocator, list);
                 },
@@ -100,7 +100,7 @@ pub fn main() !void {
             const cat = cat_token.value();
             const list = try string_map.get(cat);
             switch (first) {
-                .label, .number, .none, .sequence, .label_set => unreachable,
+                .label, .hyphenated, .number, .none, .sequence, .label_set => unreachable,
                 .point => |pt| {
                     try pt.append(allocator, list);
                 },

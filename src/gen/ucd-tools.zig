@@ -79,6 +79,8 @@ pub const TokenIterator = struct {
         var alpha: bool = false;
         var separator: bool = false;
         var range: bool = false;
+        var hyphen: bool = false;
+        var dot: bool = false;
         scan: while (iter.idx < iter.line.len) : (iter.idx += 1) {
             const b = iter.line[iter.idx];
             switch (b) {
@@ -101,15 +103,15 @@ pub const TokenIterator = struct {
                     if (iter.idx + 1 < iter.line.len and iter.line[iter.idx + 1] == '.') {
                         range = true;
                         iter.idx += 1;
+                    } else {
+                        dot = true;
                     }
                 },
                 ';' => {
                     break :scan;
                 },
                 '-' => {
-                    // right now we don't want these
-                    while (iter.idx < iter.line.len and iter.line[iter.idx] != ';') : (iter.idx += 1) {}
-                    return .none;
+                    hyphen = true;
                 },
                 else => {
                     if (!(std.ascii.isAlphabetic(b) or b == '_')) {
@@ -123,34 +125,39 @@ pub const TokenIterator = struct {
                 },
             }
         }
-        const stop: usize = if (iter.idx == 0) 0 else iter.idx;
+        const stop: usize = iter.idx;
         if (iter.idx < iter.line.len and iter.line[iter.idx] == ';') {
             iter.idx += 1;
         }
         iter.col += 1;
         // Handle trailing space in next field optimistically
-        // (if I'm right, this obviates 'contents').
         if (iter.idx < iter.line.len and iter.line[iter.idx] == ' ') iter.idx += 1;
         // empty?
         if (!contents) return .none;
         const slice = iter.line[start..stop];
+        const tok = std.mem.trim(u8, slice, " ");
+
+        if (dot and !alpha) {
+            return .{ .number = .{ .slice = tok } };
+        }
+        if (hyphen) return .{ .hyphenated = .{ .slice = tok } };
         if (alpha) {
             if (more_contents) {
-                return .{ .label_set = .{ .slice = slice } };
+                return .{ .label_set = .{ .slice = tok } };
             } else {
-                return .{ .label = .{ .slice = slice } };
+                return .{ .label = .{ .slice = tok } };
             }
         } else if (range) {
-            return .{ .range = .{ .slice = slice } };
+            return .{ .range = .{ .slice = tok } };
         } else {
             if (more_contents) {
-                return .{ .sequence = .{ .slice = slice } };
+                return .{ .sequence = .{ .slice = tok } };
             } else {
                 // Problem token: F
-                if (std.mem.trim(u8, slice, " ").len >= 4)
-                    return .{ .point = .{ .slice = slice } }
-                else
-                    return .{ .label = .{ .slice = slice } };
+                if (tok.len >= 4)
+                    return .{ .point = .{ .slice = tok } }
+                else // TODO: Might be dotless numbers?
+                    return .{ .label = .{ .slice = tok } };
             }
         }
         unreachable;
@@ -163,6 +170,7 @@ pub const Token = union(TokenKind) {
     number: Number,
     range: Range,
     label: Label,
+    hyphenated: HyphenLabel,
     sequence: Sequence,
     label_set: LabelSet,
 
@@ -172,9 +180,10 @@ pub const Token = union(TokenKind) {
             .point => |p| try writer.print(".point = {s}", .{p.slice}),
             .number => |n| try writer.print(".point = {s}", .{n.slice}),
             .range => |r| try writer.print(".range = {s}", .{r.slice}),
-            .label => |l| try writer.print(".range = {s}", .{l.slice}),
-            .sequence => |s| try writer.print(".range = {s}", .{s.slice}),
-            .label_set => |ls| try writer.print(".range = {s}", .{ls.slice}),
+            .sequence => |s| try writer.print(".sequence = {s}", .{s.slice}),
+            .label => |l| try writer.print(".label = {s}", .{l.slice}),
+            .hyphenated => |h| try writer.print(".hyphen = {s}", .{h.slice}),
+            .label_set => |ls| try writer.print(".label_set = {s}", .{ls.slice}),
         }
     }
 };
@@ -185,6 +194,7 @@ pub const TokenKind = enum(u3) {
     number,
     range,
     label,
+    hyphenated,
     sequence,
     label_set,
 };
@@ -207,7 +217,7 @@ pub const Point = struct {
 
 fn encodeOne(buf: []u8, slice: []const u8) error{TokenProblem}![]const u8 {
     var idx: usize = 0;
-    while (std.ascii.isHex(slice[idx])) : (idx += 1) {}
+    while (idx < slice.len and std.ascii.isHex(slice[idx])) : (idx += 1) {}
     const codepoint = std.fmt.parseInt(u21, slice[0..idx], 16) catch {
         return error.TokenProblem;
     };
@@ -251,6 +261,14 @@ pub const Label = struct {
 
     pub fn value(label: Label) []const u8 {
         return std.mem.trim(u8, label.slice, " ");
+    }
+};
+
+pub const HyphenLabel = struct {
+    slice: []const u8,
+
+    pub fn value(hyphen: HyphenLabel) []const u8 {
+        return std.mem.trim(u8, hyphen.slice, " ");
     }
 };
 
@@ -357,9 +375,8 @@ pub fn propertyMap(allocator: Allocator) !PropertyMap {
                     if (tok_iter.next()) |alias| {
                         const first_alias = try allocator.dupe(u8, long_token.value());
                         if (alias != .label) {
-                            // This weirdness handles a hyphen in an extra property, which we don't need
-                            // or want
-                            if (alias == .none) {
+                            // There's one hyphenated alias and we don't need it.
+                            if (alias == .hyphenated) {
                                 const long_name = try allocator.dupe(u8, long_token.value());
                                 try alias_map.put(allocator, short_name, .{ .alias = long_name });
                                 continue :scan;
