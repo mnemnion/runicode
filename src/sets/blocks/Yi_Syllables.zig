@@ -1,0 +1,6 @@
+//! Generated source!
+//! Do not modify!
+
+const RuneSet = @import("runeset").runeset;
+
+pub const Yi_Syllables = RuneSet{ .body = &.{ 0x0, 0x0, 0x40000000000, 0x0, 0x7ffff, 0x7fff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff } };

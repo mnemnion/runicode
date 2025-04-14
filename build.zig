@@ -32,61 +32,84 @@ pub fn build(b: *std.Build) void {
     // figure out how to follow the Approved Method within the Zig build system.
 
     // General Categories
+    {
+        const gen_cat_exe = b.addExecutable(.{
+            .name = "gen_cat",
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("src/gen/gen_cat.zig"),
+        });
 
-    const gen_cat_exe = b.addExecutable(.{
-        .name = "gen_cat",
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = b.path("src/gen/gen_cat.zig"),
-    });
+        gen_cat_exe.root_module.addImport("ucd-tools", tool_mod);
 
-    gen_cat_exe.root_module.addImport("ucd-tools", tool_mod);
+        b.installArtifact(gen_cat_exe);
 
-    b.installArtifact(gen_cat_exe);
+        const run_gencat = b.addRunArtifact(gen_cat_exe);
 
-    const run_gencat = b.addRunArtifact(gen_cat_exe);
+        const run_gencat_step = b.step("gen-cat", "generate files for General Categories");
 
-    const run_gencat_step = b.step("gen-cat", "generate files for General Categories");
-
-    run_gencat_step.dependOn(&run_gencat.step);
+        run_gencat_step.dependOn(&run_gencat.step);
+    }
 
     // Scripts
+    {
+        const scripts_exe = b.addExecutable(.{
+            .name = "scripts",
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("src/gen/scripts.zig"),
+        });
 
-    const scripts_exe = b.addExecutable(.{
-        .name = "scripts",
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = b.path("src/gen/scripts.zig"),
-    });
+        scripts_exe.root_module.addImport("ucd-tools", tool_mod);
 
-    scripts_exe.root_module.addImport("ucd-tools", tool_mod);
+        b.installArtifact(scripts_exe);
 
-    b.installArtifact(scripts_exe);
+        const run_scripts = b.addRunArtifact(scripts_exe);
 
-    const run_scripts = b.addRunArtifact(scripts_exe);
+        const run_scripts_step = b.step("scripts", "generate files for Scripts");
 
-    const run_scripts_step = b.step("scripts", "generate files for Scripts");
+        run_scripts_step.dependOn(&run_scripts.step);
+    }
 
-    run_scripts_step.dependOn(&run_scripts.step);
+    // Blocks
+    {
+        const blocks_exe = b.addExecutable(.{
+            .name = "blocks",
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("src/gen/blocks.zig"),
+        });
+
+        blocks_exe.root_module.addImport("ucd-tools", tool_mod);
+
+        b.installArtifact(blocks_exe);
+
+        const run_blocks = b.addRunArtifact(blocks_exe);
+
+        const run_blocks_step = b.step("blocks", "generate files for blocks");
+
+        run_blocks_step.dependOn(&run_blocks.step);
+    }
 
     // Core Properties
+    {
+        const props_exe = b.addExecutable(.{
+            .name = "props",
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("src/gen/props.zig"),
+        });
 
-    const props_exe = b.addExecutable(.{
-        .name = "props",
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = b.path("src/gen/props.zig"),
-    });
+        props_exe.root_module.addImport("ucd-tools", tool_mod);
 
-    props_exe.root_module.addImport("ucd-tools", tool_mod);
+        b.installArtifact(props_exe);
 
-    b.installArtifact(props_exe);
+        const run_props = b.addRunArtifact(props_exe);
 
-    const run_props = b.addRunArtifact(props_exe);
+        const run_props_step = b.step("props", "generate files for Properties");
 
-    const run_props_step = b.step("props", "generate files for Properties");
-
-    run_props_step.dependOn(&run_props.step);
+        run_props_step.dependOn(&run_props.step);
+    }
 
     // Outward-facing Modules
 

@@ -37,7 +37,8 @@ pub const DecodeError = error{
 pub fn LineIterator(Reader: type) type {
     return struct {
         read: Reader,
-        buf: [4096]u8 = undefined,
+        // Longest line in the database as of 16.0: 25541.  Page align to 4K:
+        buf: [28_672]u8 = undefined,
         line: usize = 0,
         pub const LineIter = @This();
 
@@ -260,7 +261,7 @@ pub const Label = struct {
     slice: []const u8,
 
     pub fn value(label: Label) []const u8 {
-        return std.mem.trim(u8, label.slice, " ");
+        return label.slice;
     }
 };
 
@@ -268,7 +269,7 @@ pub const HyphenLabel = struct {
     slice: []const u8,
 
     pub fn value(hyphen: HyphenLabel) []const u8 {
-        return std.mem.trim(u8, hyphen.slice, " ");
+        return hyphen.slice;
     }
 };
 
@@ -291,6 +292,10 @@ pub const LabelSet = struct {
 
     pub fn iterator(ls: *LabelSet) std.mem.TokenIterator(u8, .scalar) {
         return std.mem.tokenizeScalar(u8, ls.slice, ' ');
+    }
+
+    pub fn value(ls: *const LabelSet) []const u8 {
+        return ls.slice;
     }
 };
 

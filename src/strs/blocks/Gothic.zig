@@ -1,0 +1,4 @@
+//! Generated source!
+//! Do not modify!
+
+pub const Gothic = "𐌰𐌱𐌲𐌳𐌴𐌵𐌶𐌷𐌸𐌹𐌺𐌻𐌼𐌽𐌾𐌿𐍀𐍁𐍂𐍃𐍄𐍅𐍆𐍇𐍈𐍉𐍊\u{1034b}\u{1034c}\u{1034d}\u{1034e}";
