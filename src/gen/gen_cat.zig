@@ -144,6 +144,22 @@ pub fn main() !void {
         }
         try main_buf.flush();
     }
+    // Create and write General Category enum
+    {
+        const main_file = try std.fs.cwd()
+            .createFile("src/enums/GeneralCategory.zig", .{ .lock = .exclusive });
+        defer main_file.close();
+        var main_buf = std.io.bufferedWriter(main_file.writer());
+        var main_write = main_buf.writer();
+        try main_write.writeAll(header_txt);
+        try main_write.writeAll("pub const GeneralCategoryKind = enum {\n");
+
+        for (sorted_keys) |key| {
+            try main_write.print("    {s},\n", .{key});
+        }
+        try main_write.writeAll("};\n");
+        try main_buf.flush();
+    }
 
     // This just gives visible output as a signal that the job was done.
     {

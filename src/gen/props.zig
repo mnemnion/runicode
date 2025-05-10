@@ -64,7 +64,7 @@ pub fn main() !void {
             const first = tok_iter.next().?;
             const cat_token = tok_iter.next().?.label;
             if (tok_iter.next()) |tok| {
-                // TODO: These are all Indian Conjunt Break InCB, the important classifier is
+                // TODO: These are all Indian Conjunct Break InCB, the important classifier is
                 // this third category.  Let's do something about it...
                 _ = tok;
             }
@@ -172,6 +172,23 @@ pub fn main() !void {
             try rune.serialize(str_write, .public, key);
             try str_buf.flush();
         }
+        try main_buf.flush();
+    }
+
+    // Create and write CoreProperties enum
+    {
+        const main_file = try std.fs.cwd()
+            .createFile("src/enums/CoreProperties.zig", .{ .lock = .exclusive });
+        defer main_file.close();
+        var main_buf = std.io.bufferedWriter(main_file.writer());
+        var main_write = main_buf.writer();
+        try main_write.writeAll(header_txt);
+        try main_write.writeAll("pub const CorePropertyKind = enum {\n");
+
+        for (sorted_keys) |key| {
+            try main_write.print("    {s},\n", .{key});
+        }
+        try main_write.writeAll("};\n");
         try main_buf.flush();
     }
 

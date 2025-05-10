@@ -5,17 +5,13 @@
 //! With various inspirations and borrowings from zg.
 //!
 
+// TODO: Write unicoder out of runeset and use that instead of std.unicode
+
 // Forward-import ezcaper and runeset modules
 
 pub const ezcaper = @import("ezcaper");
 
-const esc_string = ezcaper.escStringExact;
-
 pub const runeset = @import("runeset");
-
-const RuneSet = runeset.RuneSet;
-
-pub const RuneMap = std.StringHashMapUnmanaged(RuneSet);
 
 pub fn ltString(_: void, l: []const u8, r: []const u8) bool {
     return std.mem.order(u8, l, r) == .lt;
@@ -27,6 +23,7 @@ pub fn ltString(_: void, l: []const u8, r: []const u8) bool {
 // NOTE: At least the GraphemeTest.txt file has lines which I suspect are
 // longer than 4k.  Let's keep that in mind.
 
+// TODO: This isn't used in a proper way. Probably we dispose
 pub const DecodeError = error{
     OutOfMemory,
     TokenProblem,
@@ -37,7 +34,7 @@ pub const DecodeError = error{
 pub fn LineIterator(Reader: type) type {
     return struct {
         read: Reader,
-        // Longest line in the database as of 16.0: 25541.  Page align to 4K:
+        // Longest line in the database as of 16.0: 25541. Page align to 4K:
         buf: [28_672]u8 = undefined,
         line: usize = 0,
         pub const LineIter = @This();
@@ -294,8 +291,8 @@ pub const LabelSet = struct {
         return std.mem.tokenizeScalar(u8, ls.slice, ' ');
     }
 
-    pub fn value(ls: *const LabelSet) []const u8 {
-        return ls.slice;
+    pub fn value(set: LabelSet) []const u8 {
+        return set.slice;
     }
 };
 
@@ -345,10 +342,6 @@ const Alias = union(enum) {
     alias: []const u8,
     aliases: [][]const u8,
 };
-
-const AliasMap = std.StringHashMapUnmanaged(Alias);
-
-pub const PropertyMap = std.StringHashMapUnmanaged(AliasMap);
 
 pub fn propertyMap(allocator: Allocator) !PropertyMap {
     var prop_map: PropertyMap = .empty;
@@ -419,8 +412,6 @@ pub fn propertyMap(allocator: Allocator) !PropertyMap {
     return prop_map;
 }
 
-// TODO: Write unicoder out of runeset and use that instead of std.unicode
-
 const std = @import("std");
 const assert = std.debug.assert;
 const TextList = std.ArrayListUnmanaged(u8);
@@ -428,3 +419,13 @@ const AliasesList = std.ArrayListUnmanaged([]const u8);
 const Allocator = std.mem.Allocator;
 const StringHash = std.StringHashMapUnmanaged(TextList);
 const FmtOps = std.fmt.FormatOptions;
+
+const AliasMap = std.StringHashMapUnmanaged(Alias);
+
+pub const PropertyMap = std.StringHashMapUnmanaged(AliasMap);
+
+const esc_string = ezcaper.escStringExact;
+
+const RuneSet = runeset.RuneSet;
+
+pub const RuneMap = std.StringHashMapUnmanaged(RuneSet);

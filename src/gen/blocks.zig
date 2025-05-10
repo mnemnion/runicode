@@ -98,6 +98,7 @@ pub fn main() !void {
             try str_buf.flush();
         }
     }
+
     // Create and write Runesets
     {
         var rune_map: RuneMap = .empty;
@@ -149,6 +150,23 @@ pub fn main() !void {
             try rune.serialize(str_write, .public, key);
             try str_buf.flush();
         }
+        try main_buf.flush();
+    }
+
+    // Create and write Blocks enum
+    {
+        const main_file = try std.fs.cwd()
+            .createFile("src/enums/Blocks.zig", .{ .lock = .exclusive });
+        defer main_file.close();
+        var main_buf = std.io.bufferedWriter(main_file.writer());
+        var main_write = main_buf.writer();
+        try main_write.writeAll(header_txt);
+        try main_write.writeAll("pub const BlocksKind = enum {\n");
+
+        for (sorted_keys) |key| {
+            try main_write.print("    {s},\n", .{key});
+        }
+        try main_write.writeAll("};\n");
         try main_buf.flush();
     }
 

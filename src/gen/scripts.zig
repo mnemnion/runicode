@@ -225,6 +225,7 @@ pub fn main() !void {
             try str_buf.flush();
         }
     }
+
     // Create and write Runesets
     {
         var rune_map: RuneMap = .empty;
@@ -257,6 +258,40 @@ pub fn main() !void {
             try rune.serialize(str_write, .public, key);
             try str_buf.flush();
         }
+        try main_buf.flush();
+    }
+
+    // Create and write Scripts enum
+    {
+        const main_file = try std.fs.cwd()
+            .createFile("src/enums/Scripts.zig", .{ .lock = .exclusive });
+        defer main_file.close();
+        var main_buf = std.io.bufferedWriter(main_file.writer());
+        var main_write = main_buf.writer();
+        try main_write.writeAll(header_txt);
+        try main_write.writeAll("pub const ScriptsKind = enum {\n");
+
+        for (sorted_keys) |key| {
+            try main_write.print("    {s},\n", .{key});
+        }
+        try main_write.writeAll("};\n\n");
+        // const sorted_short_keys = try short_map.
+
+        var short_sort = try allocator.alloc([]const u8, short_map.count());
+        {
+            var key_iter = short_map.keyIterator();
+            var idx: usize = 0;
+            while (key_iter.next()) |key| : (idx += 1) {
+                short_sort[idx] = key.*;
+            }
+            std.mem.sort([]const u8, short_sort, {}, tools.ltString);
+        }
+
+        try main_write.writeAll("pub const ShortScriptsKind = enum {\n");
+        for (short_sort) |key| {
+            try main_write.print("    {s},\n", .{key});
+        }
+        try main_write.writeAll("};\n");
         try main_buf.flush();
     }
 
