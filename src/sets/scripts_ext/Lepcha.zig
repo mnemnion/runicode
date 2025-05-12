@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Lepcha = RuneSet{ .body = &.{ 0x0, 0x0, 0x200000000, 0x0, 0x3000000000000, 0x61ff, 0x7857f7f7ffffffff } };
+pub const Lepcha = RuneSet{ .body = &.{ 0x0, 0x0, 0x200000000, 0x0, 0x3000000000000, 0xe3ff, 0xf8ffffffffffffff } };

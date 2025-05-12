@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Phoenician = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x10000, 0x1000000000, 0x87dfffff } };
+pub const Phoenician = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x10000, 0x1000000000, 0x8fffffff } };

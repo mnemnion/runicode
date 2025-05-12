@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Vithkuqi = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x10000, 0x600000, 0xf3ff000000000000, 0x9f9fff9ff93f3ff } };
+pub const Vithkuqi = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x10000, 0x600000, 0xf7ff000000000000, 0x1bfbfffbffb7f7ff } };

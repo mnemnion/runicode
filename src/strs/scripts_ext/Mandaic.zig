@@ -1,4 +1,4 @@
 //! Generated source!
 //! Do not modify!
 
-pub const Mandaic = "ࡀࡁࡂࡃࡄࡅࡆࡇࡈࡉࡊࡋࡌࡍࡎࡏࡐࡑࡒࡓࡔࡕࡖࡗ࡙࡚࡞ـ";
+pub const Mandaic = "ࡀࡁࡂࡃࡄࡅࡆࡇࡈࡉࡊࡋࡌࡍࡎࡏࡐࡑࡒࡓࡔࡕࡖࡗࡘ࡙࡚࡛࡞ـ";

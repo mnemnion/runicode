@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const CJK_Radicals_Supplement = RuneSet{ .body = &.{ 0x0, 0x0, 0x400000000, 0x0, 0xc00000000000000, 0x7fffffffffffffff, 0xffffffffffffffff } };
+pub const CJK_Radicals_Supplement = RuneSet{ .body = &.{ 0x0, 0x0, 0x400000000, 0x0, 0xc00000000000000, 0xffffffffffffffff, 0xffffffffffffffff } };

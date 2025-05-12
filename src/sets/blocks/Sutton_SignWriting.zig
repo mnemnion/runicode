@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Sutton_SignWriting = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x20000000, 0x7ff00000000, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0x7fffffffffff } };
+pub const Sutton_SignWriting = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x20000000, 0x7ff00000000, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffff } };

@@ -1,4 +1,4 @@
 //! Generated source!
 //! Do not modify!
 
-pub const Lt = "ǅǈǋǲᾈᾉᾊᾋᾌᾍᾎᾘᾙᾚᾛᾜᾝᾞᾨᾩᾪᾫᾬᾭᾮᾼῌῼ";
+pub const Lt = "ǅǈǋǲᾈᾉᾊᾋᾌᾍᾎᾏᾘᾙᾚᾛᾜᾝᾞᾟᾨᾩᾪᾫᾬᾭᾮᾯᾼῌῼ";

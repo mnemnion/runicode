@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Meroitic_Cursive = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x10000, 0xc000000000, 0x507fffff00000000, 0x7ffffffffffc7fff } };
+pub const Meroitic_Cursive = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x10000, 0xc000000000, 0xf0ffffff00000000, 0xfffffffffffcffff } };

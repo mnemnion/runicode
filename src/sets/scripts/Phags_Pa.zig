@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Phags_Pa = RuneSet{ .body = &.{ 0x0, 0x0, 0x40000000000, 0x0, 0x200000000, 0x77ffffffffffff } };
+pub const Phags_Pa = RuneSet{ .body = &.{ 0x0, 0x0, 0x40000000000, 0x0, 0x200000000, 0xffffffffffffff } };

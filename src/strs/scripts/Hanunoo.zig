@@ -1,4 +1,4 @@
 //! Generated source!
 //! Do not modify!
 
-pub const Hanunoo = "ᜠᜡᜢᜣᜤᜥᜦᜧᜨᜩᜪᜫᜬᜭᜮᜯᜰᜲ᜴";
+pub const Hanunoo = "ᜠᜡᜢᜣᜤᜥᜦᜧᜨᜩᜪᜫᜬᜭᜮᜯᜰᜱᜲᜳ᜴";

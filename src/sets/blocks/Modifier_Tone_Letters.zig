@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Modifier_Tone_Letters = RuneSet{ .body = &.{ 0x0, 0x0, 0x40000000000, 0x0, 0x10000000, 0x7fffffff } };
+pub const Modifier_Tone_Letters = RuneSet{ .body = &.{ 0x0, 0x0, 0x40000000000, 0x0, 0x10000000, 0xffffffff } };

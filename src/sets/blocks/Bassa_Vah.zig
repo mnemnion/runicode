@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Bassa_Vah = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x400000, 0x80000000000, 0x7fffffffffff0000 } };
+pub const Bassa_Vah = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x400000, 0x80000000000, 0xffffffffffff0000 } };

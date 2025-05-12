@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Batak = RuneSet{ .body = &.{ 0x0, 0x0, 0x200000000, 0x0, 0x800000000000, 0x7005eddfffffffff } };
+pub const Batak = RuneSet{ .body = &.{ 0x0, 0x0, 0x200000000, 0x0, 0x800000000000, 0xf00fffffffffffff } };

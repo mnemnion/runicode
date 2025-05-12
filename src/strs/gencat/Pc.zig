@@ -1,4 +1,4 @@
 //! Generated source!
 //! Do not modify!
 
-pub const Pc = "_‿⁔︳﹍﹎＿";
+pub const Pc = "_‿⁀⁔︳︴﹍﹎﹏＿";

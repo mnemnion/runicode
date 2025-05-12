@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Elymaic = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x10000, 0x8000000000000000, 0x3fffff00000000 } };
+pub const Elymaic = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x10000, 0x8000000000000000, 0x7fffff00000000 } };

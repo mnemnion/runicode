@@ -244,7 +244,7 @@ pub const Range = struct {
         const end = std.fmt.parseInt(u21, range.slice[two..idx], 16) catch {
             return error.TokenProblem;
         };
-        for (start..end) |cp_usize| {
+        for (start..end + 1) |cp_usize| {
             const codepoint: u21 = @intCast(cp_usize);
             const len = std.unicode.wtf8Encode(codepoint, &buf) catch {
                 return error.TokenProblem;

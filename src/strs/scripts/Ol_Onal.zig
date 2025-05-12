@@ -1,4 +1,4 @@
 //! Generated source!
 //! Do not modify!
 
-pub const Ol_Onal = "𞗐𞗑𞗒𞗓𞗔𞗕𞗖𞗗𞗘𞗙𞗚𞗛𞗜𞗝𞗞𞗟𞗠𞗡𞗢𞗣𞗤𞗥𞗦𞗧𞗨𞗩𞗪𞗫𞗬𞗮𞗰𞗱𞗲𞗳𞗴𞗵𞗶𞗷𞗸𞗹𞗿";
+pub const Ol_Onal = "𞗐𞗑𞗒𞗓𞗔𞗕𞗖𞗗𞗘𞗙𞗚𞗛𞗜𞗝𞗞𞗟𞗠𞗡𞗢𞗣𞗤𞗥𞗦𞗧𞗨𞗩𞗪𞗫𞗬𞗭𞗯𞗮𞗰𞗱𞗲𞗳𞗴𞗵𞗶𞗷𞗸𞗹𞗺𞗿";

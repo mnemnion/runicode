@@ -1,4 +1,4 @@
 //! Generated source!
 //! Do not modify!
 
-pub const Gunjala_Gondi = "𑵠𑵡𑵢𑵣𑵤𑵧𑵪𑵫𑵬𑵭𑵮𑵯𑵰𑵱𑵲𑵳𑵴𑵵𑵶𑵷𑵸𑵹𑵺𑵻𑵼𑵽𑵾𑵿𑶀𑶁𑶂𑶃𑶄𑶅𑶆𑶇𑶈𑶊𑶋𑶌𑶍𑶐𑶓𑶕𑶖𑶗𑶘𑶠𑶡𑶢𑶣𑶤𑶥𑶦𑶧𑶨";
+pub const Gunjala_Gondi = "𑵠𑵡𑵢𑵣𑵤𑵥𑵧𑵨𑵪𑵫𑵬𑵭𑵮𑵯𑵰𑵱𑵲𑵳𑵴𑵵𑵶𑵷𑵸𑵹𑵺𑵻𑵼𑵽𑵾𑵿𑶀𑶁𑶂𑶃𑶄𑶅𑶆𑶇𑶈𑶉𑶊𑶋𑶌𑶍𑶎𑶐𑶑𑶓𑶔𑶕𑶖𑶗𑶘𑶠𑶡𑶢𑶣𑶤𑶥𑶦𑶧𑶨𑶩";

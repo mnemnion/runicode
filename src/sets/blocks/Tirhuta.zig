@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Tirhuta = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x20000, 0xc0000, 0xffffffffffffffff, 0x7fffffff } };
+pub const Tirhuta = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x20000, 0xc0000, 0xffffffffffffffff, 0xffffffff } };

@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Bopomofo = RuneSet{ .body = &.{ 0x0, 0x0, 0x800000000, 0x0, 0x10, 0x7fffffffffff } };
+pub const Bopomofo = RuneSet{ .body = &.{ 0x0, 0x0, 0x800000000, 0x0, 0x10, 0xffffffffffff } };

@@ -1,4 +1,4 @@
 //! Generated source!
 //! Do not modify!
 
-pub const Syloti_Nagri = "ꠀꠂꠃꠄ꠆ꠇꠈꠉꠋꠌꠍꠎꠏꠐꠑꠒꠓꠔꠕꠖꠗꠘꠙꠚꠛꠜꠝꠞꠟꠠꠡꠣꠥꠧ꠨꠩꠪꠬";
+pub const Syloti_Nagri = "ꠀꠁꠂꠃꠄꠅ꠆ꠇꠈꠉꠊꠋꠌꠍꠎꠏꠐꠑꠒꠓꠔꠕꠖꠗꠘꠙꠚꠛꠜꠝꠞꠟꠠꠡꠢꠣꠤꠥꠦꠧ꠨꠩꠪꠫꠬";

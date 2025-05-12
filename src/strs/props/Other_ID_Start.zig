@@ -1,4 +1,4 @@
 //! Generated source!
 //! Do not modify!
 
-pub const Other_ID_Start = "ᢅ℘℮゛";
+pub const Other_ID_Start = "ᢅᢆ℘℮゛゜";

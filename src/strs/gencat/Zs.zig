@@ -1,4 +1,4 @@
 //! Generated source!
 //! Do not modify!
 
-pub const Zs = "               　";
+pub const Zs = "                　";

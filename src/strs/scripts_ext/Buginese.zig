@@ -1,4 +1,4 @@
 //! Generated source!
 //! Do not modify!
 
-pub const Buginese = "ᨀᨁᨂᨃᨄᨅᨆᨇᨈᨉᨊᨋᨌᨍᨎᨏᨐᨑᨒᨓᨔᨕᨗᨙᨛ᨞ꧏ";
+pub const Buginese = "ᨀᨁᨂᨃᨄᨅᨆᨇᨈᨉᨊᨋᨌᨍᨎᨏᨐᨑᨒᨓᨔᨕᨖᨘᨗᨙᨚᨛ᨞᨟ꧏ";

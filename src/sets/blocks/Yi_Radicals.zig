@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Yi_Radicals = RuneSet{ .body = &.{ 0x0, 0x0, 0x40000000000, 0x0, 0xc0000, 0x7fff, 0xffffffffffff0000 } };
+pub const Yi_Radicals = RuneSet{ .body = &.{ 0x0, 0x0, 0x40000000000, 0x0, 0xc0000, 0xffff, 0xffffffffffff0000 } };

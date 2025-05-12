@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const CJK_Strokes = RuneSet{ .body = &.{ 0x0, 0x0, 0x800000000, 0x0, 0x80, 0x7fffffffffff } };
+pub const CJK_Strokes = RuneSet{ .body = &.{ 0x0, 0x0, 0x800000000, 0x0, 0x80, 0xffffffffffff } };

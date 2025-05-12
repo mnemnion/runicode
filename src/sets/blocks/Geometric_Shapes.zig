@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Geometric_Shapes = RuneSet{ .body = &.{ 0x0, 0x0, 0x400000000, 0x0, 0xc00000, 0x7fffffffffffffff, 0xffffffff00000000 } };
+pub const Geometric_Shapes = RuneSet{ .body = &.{ 0x0, 0x0, 0x400000000, 0x0, 0xc00000, 0xffffffffffffffff, 0xffffffff00000000 } };

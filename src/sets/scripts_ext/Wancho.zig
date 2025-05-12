@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Wancho = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x40000000, 0x800, 0x81ff77ffffffffff } };
+pub const Wancho = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x40000000, 0x800, 0x83ffffffffffffff } };

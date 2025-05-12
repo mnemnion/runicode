@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Hanifi_Rohingya = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x10000, 0x10000000000000, 0x1ff0077ffffffff } };
+pub const Hanifi_Rohingya = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x10000, 0x10000000000000, 0x3ff00ffffffffff } };

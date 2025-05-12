@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Cham = RuneSet{ .body = &.{ 0x0, 0x0, 0x40000000000, 0x0, 0x30000000000, 0x71ff37fb, 0x2abeffffffffff } };
+pub const Cham = RuneSet{ .body = &.{ 0x0, 0x0, 0x40000000000, 0x0, 0x30000000000, 0xf3ff3fff, 0x7fffffffffffff } };

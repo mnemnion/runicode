@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Block_Elements = RuneSet{ .body = &.{ 0x0, 0x0, 0x400000000, 0x0, 0x400000, 0x7fffffff } };
+pub const Block_Elements = RuneSet{ .body = &.{ 0x0, 0x0, 0x400000000, 0x0, 0x400000, 0xffffffff } };

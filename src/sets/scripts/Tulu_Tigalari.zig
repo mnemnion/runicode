@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Tulu_Tigalari = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x20000, 0xc000, 0xfb9fffffffff49ff, 0x2009fd3a4 } };
+pub const Tulu_Tigalari = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x20000, 0xc000, 0xffbfffffffff4bff, 0x601bff7a5 } };

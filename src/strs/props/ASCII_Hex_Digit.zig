@@ -1,4 +1,4 @@
 //! Generated source!
 //! Do not modify!
 
-pub const ASCII_Hex_Digit = "012345678ABCDEabcde";
+pub const ASCII_Hex_Digit = "0123456789ABCDEFabcdef";

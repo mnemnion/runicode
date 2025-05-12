@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const ASCII_Hex_Digit = RuneSet{ .body = &.{ 0x143833713099145216, 0x3e0000003e, 0x0, 0x0 } };
+pub const ASCII_Hex_Digit = RuneSet{ .body = &.{ 0x287948901175001088, 0x7e0000007e, 0x0, 0x0 } };

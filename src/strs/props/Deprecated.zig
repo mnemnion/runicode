@@ -1,4 +1,4 @@
 //! Generated source!
 //! Do not modify!
 
-pub const Deprecated = "ŉٳཷཹឣ⁪⁫⁬⁭⁮〈〉󠀁";
+pub const Deprecated = "ŉٳཷཹឣឤ⁪⁫⁬⁭⁮⁯〈〉󠀁";

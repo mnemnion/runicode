@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Miao = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x400000, 0x7000000000000000, 0xffffffffffffffff, 0xffffffffffff83ff, 0x7ffb807f } };
+pub const Miao = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x400000, 0x7000000000000000, 0xffffffffffffffff, 0xffffffffffff87ff, 0xffff80ff } };

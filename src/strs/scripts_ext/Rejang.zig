@@ -1,4 +1,4 @@
 //! Generated source!
 //! Do not modify!
 
-pub const Rejang = "ꤰꤱꤲꤳꤴꤵꤶꤷꤸꤹꤺꤻꤼꤽꤾꤿꥀꥁꥂꥃꥄꥅꥇꥈꥉꥊꥋꥌꥍꥎꥏꥐꥒ꥟";
+pub const Rejang = "ꤰꤱꤲꤳꤴꤵꤶꤷꤸꤹꤺꤻꤼꤽꤾꤿꥀꥁꥂꥃꥄꥅꥆꥇꥈꥉꥊꥋꥌꥍꥎꥏꥐꥑꥒ꥓꥟";

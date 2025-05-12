@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Hanunoo = RuneSet{ .body = &.{ 0x0, 0x0, 0x200000000, 0x0, 0x10000000, 0x15ffff00000000 } };
+pub const Hanunoo = RuneSet{ .body = &.{ 0x0, 0x0, 0x200000000, 0x0, 0x10000000, 0x1fffff00000000 } };

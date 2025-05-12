@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Garay = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x10000, 0x60000000000000, 0xffffde1fffffddff, 0x401f } };
+pub const Garay = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x10000, 0x60000000000000, 0xfffffe3fffffffff, 0xc03f } };

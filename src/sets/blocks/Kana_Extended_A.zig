@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Kana_Extended_A = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x8000000, 0x10, 0x7fffffffffff } };
+pub const Kana_Extended_A = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x8000000, 0x10, 0xffffffffffff } };

@@ -1,4 +1,4 @@
 //! Generated source!
 //! Do not modify!
 
-pub const Supplemental_Arrows_A = "⟰⟱⟲⟳⟴⟵⟶⟷⟸⟹⟺⟻⟼⟽⟾";
+pub const Supplemental_Arrows_A = "⟰⟱⟲⟳⟴⟵⟶⟷⟸⟹⟺⟻⟼⟽⟾⟿";

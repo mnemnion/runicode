@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Soyombo = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x20000, 0x60000000000, 0xfffffffff6bf0000, 0x3edbffdff } };
+pub const Soyombo = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x20000, 0x60000000000, 0xffffffffffff0000, 0x7ffffffff } };

@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Old_Hungarian = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x10000, 0xc000000000000, 0x3ffffffffffff, 0x7c03ffffffffffff } };
+pub const Old_Hungarian = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x10000, 0xc000000000000, 0x7ffffffffffff, 0xfc07ffffffffffff } };

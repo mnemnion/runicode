@@ -1,4 +1,4 @@
 //! Generated source!
 //! Do not modify!
 
-pub const Ideographic_Description_Characters = "⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻⿼⿽⿾";
+pub const Ideographic_Description_Characters = "⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻⿼⿽⿾⿿";

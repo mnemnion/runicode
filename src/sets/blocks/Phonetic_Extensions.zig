@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Phonetic_Extensions = RuneSet{ .body = &.{ 0x0, 0x0, 0x200000000, 0x0, 0x30000000000000, 0x7fffffffffffffff, 0xffffffffffffffff } };
+pub const Phonetic_Extensions = RuneSet{ .body = &.{ 0x0, 0x0, 0x200000000, 0x0, 0x30000000000000, 0xffffffffffffffff, 0xffffffffffffffff } };

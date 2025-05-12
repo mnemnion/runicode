@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Tai_Tham = RuneSet{ .body = &.{ 0x0, 0x0, 0x200000000, 0x0, 0x70000000000, 0x7fffffffffff, 0xffffffffffffffff, 0xffffffff00000000 } };
+pub const Tai_Tham = RuneSet{ .body = &.{ 0x0, 0x0, 0x200000000, 0x0, 0x70000000000, 0xffffffffffff, 0xffffffffffffffff, 0xffffffff00000000 } };

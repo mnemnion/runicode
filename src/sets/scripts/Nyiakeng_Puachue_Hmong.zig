@@ -3,4 +3,4 @@
 
 const RuneSet = @import("runeset").runeset;
 
-pub const Nyiakeng_Puachue_Hmong = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x40000000, 0x30, 0x1fbf0fffffffffff, 0xc1ff } };
+pub const Nyiakeng_Puachue_Hmong = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x40000000, 0x30, 0x3fff1fffffffffff, 0xc3ff } };
