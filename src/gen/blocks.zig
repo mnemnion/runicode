@@ -5,9 +5,10 @@
 const std = @import("std");
 
 const tools = @import("ucd-tools");
-const escString = tools.ezcaper.escStringExact;
+const escString = tools.ezcaper.escStringExactQuoted;
 
-const Runeset = tools.runeset.RuneSet;
+const CodepointMap = tools.CodepointMap;
+const Runeset = tools.runeset.runeset.RuneSet;
 const RuneMap = tools.RuneMap;
 
 const LineIterator = tools.LineIterator;
@@ -19,13 +20,14 @@ pub fn main() !void {
     defer arena.deinit();
     const allocator = arena.allocator();
     var string_map: StringMap = .{ .allocator = allocator };
+    var codepoint_map: CodepointMap = .{ .allocator = allocator };
 
     // TODO: Synonyms from PropertyValueAliases
 
     var in_file = try std.fs.cwd().openFile("UCD/Blocks.txt", .{});
     defer in_file.close();
-    var in_buf = std.io.bufferedReader(in_file.reader());
-    const in_reader = in_buf.reader();
+    var in_buf: [4096]u8 = undefined;
+    const in_reader = in_file.reader(&in_buf);
     var line_iter: LineIterator(@TypeOf(in_reader)) = .{ .read = in_reader };
     var buf: [128]u8 = undefined;
     while (try line_iter.next()) |tok_iter_const| {
@@ -42,10 +44,12 @@ pub fn main() !void {
             .hyphenated => |h| block = normalize(&buf, h.value()),
         }
         const list = try string_map.get(block);
+        const codepoints = try codepoint_map.get(block);
         switch (first) {
             .label, .point, .hyphenated, .none, .number, .sequence, .label_set => unreachable,
             .range => |r| {
                 try r.append(allocator, list);
+                try r.appendCodepoints(allocator, codepoints);
             },
         }
     }
@@ -58,7 +62,9 @@ pub fn main() !void {
         const main_file = try std.fs.cwd()
             .createFile("src/strs/Blocks.zig", .{ .lock = .exclusive });
         defer main_file.close();
-        var main_write = main_file.writer();
+        var main_buf: [4096]u8 = undefined;
+        var main_writer = main_file.writer(&main_buf);
+        const main_write = &main_writer.interface;
         try main_write.writeAll(header_txt);
         for (sorted_keys) |key| {
             try main_write.print(
@@ -91,12 +97,14 @@ pub fn main() !void {
             var str_file = try std.fs.cwd()
                 .createFile(try srcPath(&path_list, "src/strs/blocks/", key), .{ .lock = .exclusive });
             defer str_file.close();
-            var str_buf = std.io.bufferedWriter(str_file.writer());
-            var str_write = str_buf.writer();
+            var str_buf: [4096]u8 = undefined;
+            var str_writer = str_file.writer(&str_buf);
+            const str_write = &str_writer.interface;
             try str_write.writeAll(header_txt);
-            try str_write.print("pub const {s} = {};\n", .{ key, escString(str) });
-            try str_buf.flush();
+            try str_write.print("pub const {s} = {f};\n", .{ key, escString(str) });
+            try str_write.flush();
         }
+        try main_write.flush();
     }
 
     // Create and write Runesets
@@ -110,8 +118,9 @@ pub fn main() !void {
         const main_file = try std.fs.cwd()
             .createFile("src/sets/Blocks.zig", .{ .lock = .exclusive });
         defer main_file.close();
-        var main_buf = std.io.bufferedWriter(main_file.writer());
-        var main_write = main_buf.writer();
+        var main_buf: [4096]u8 = undefined;
+        var main_writer = main_file.writer(&main_buf);
+        const main_write = &main_writer.interface;
         try main_write.writeAll(header_txt);
 
         for (sorted_keys) |key| {
@@ -143,15 +152,16 @@ pub fn main() !void {
             var str_file = try std.fs.cwd()
                 .createFile(try srcPath(&path_list, "src/sets/blocks/", key), .{ .lock = .exclusive });
             defer str_file.close();
-            var str_buf = std.io.bufferedWriter(str_file.writer());
-            var str_write = str_buf.writer();
+            var str_buf: [4096]u8 = undefined;
+            var str_writer = str_file.writer(&str_buf);
+            const str_write = &str_writer.interface;
             try str_write.writeAll(header_txt);
             try str_write.writeAll("const RuneSet = @import(\"runeset\").runeset;\n\n");
             try str_write.print("// Length: {d}.\n", .{rune.body.len});
             try rune.serialize(str_write, .public, key);
-            try str_buf.flush();
+            try str_write.flush();
         }
-        try main_buf.flush();
+        try main_write.flush();
     }
 
     // Create and write Blocks enum
@@ -159,8 +169,9 @@ pub fn main() !void {
         const main_file = try std.fs.cwd()
             .createFile("src/enums/Blocks.zig", .{ .lock = .exclusive });
         defer main_file.close();
-        var main_buf = std.io.bufferedWriter(main_file.writer());
-        var main_write = main_buf.writer();
+        var main_buf: [4096]u8 = undefined;
+        var main_writer = main_file.writer(&main_buf);
+        const main_write = &main_writer.interface;
         try main_write.writeAll(header_txt);
         try main_write.writeAll("pub const BlocksKind = enum {\n");
 
@@ -168,14 +179,41 @@ pub fn main() !void {
             try main_write.print("    {s},\n", .{key});
         }
         try main_write.writeAll("};\n");
-        try main_buf.flush();
+        try main_write.flush();
+    }
+    // Write codepoint files
+    {
+        try std.fs.cwd().makePath("src/codepoints/blocks");
+        const main_file = try std.fs.cwd()
+            .createFile("src/codepoints/Blocks.zig", .{ .lock = .exclusive });
+        defer main_file.close();
+        var main_buf: [4096]u8 = undefined;
+        var main_writer = main_file.writer(&main_buf);
+        const main_write = &main_writer.interface;
+        try main_write.writeAll(header_txt);
+        for (sorted_keys) |key| {
+            try main_write.print(
+                \\pub const {s} = @import("blocks/{s}.zig").{s};
+                \\
+                \\
+            , .{ key, key, key });
+            const codepoints = (try codepoint_map.get(key)).items;
+            var cp_file = try std.fs.cwd()
+                .createFile(try srcPath(&path_list, "src/codepoints/blocks/", key), .{ .lock = .exclusive });
+            defer cp_file.close();
+            var cp_buf: [4096]u8 = undefined;
+            var cp_writer = cp_file.writer(&cp_buf);
+            const cp_write = &cp_writer.interface;
+            try cp_write.writeAll(header_txt);
+            try tools.writeCodepointArray(cp_write, key, codepoints);
+            try cp_write.flush();
+        }
+        try main_write.flush();
     }
 
     // This just gives visible output as a signal that the job was done.
     {
-        const stdout = std.io.getStdOut();
-        defer stdout.close();
-        var writer = stdout.writer();
+        const writer = std.fs.File.stdout().deprecatedWriter();
         for (sorted_keys) |key| {
             std.debug.print("{s} ", .{key});
         }
@@ -208,4 +246,4 @@ fn srcPath(tl: *TextList, prefix: []const u8, key: []const u8) ![]const u8 {
     return tl.toOwnedSlice();
 }
 
-const TextList = std.ArrayList(u8);
+const TextList = std.array_list.Managed(u8);

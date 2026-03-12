@@ -40,7 +40,7 @@ pub fn LineIterator(Reader: type) type {
         pub const LineIter = @This();
 
         pub fn next(iter: *LineIter) !?TokenIterator {
-            while (try iter.read.readUntilDelimiterOrEof(&iter.buf, '\n')) |line| {
+            while (try takeLine(&iter.read)) |line| {
                 iter.line += 1;
                 if (line.len == 0 or line[0] == '#') continue;
                 return if (std.mem.indexOfScalar(u8, line, '#')) |hash|
@@ -49,6 +49,13 @@ pub fn LineIterator(Reader: type) type {
                     .{ .line = line };
             }
             return null;
+        }
+
+        fn takeLine(read: *Reader) !?[]const u8 {
+            if (@hasField(Reader, "interface")) {
+                return try read.interface.takeDelimiter('\n');
+            }
+            return try read.takeDelimiter('\n');
         }
     };
 }
@@ -211,6 +218,19 @@ pub const Point = struct {
         const utf8 = try encodeOne(buf[0..4], point.slice);
         try list.appendSlice(allocator, utf8);
     }
+
+    pub fn appendCodepoint(point: Point, allocator: Allocator, list: *CodepointList) DecodeError!void {
+        const cp = try point.codepoint();
+        try list.append(allocator, cp);
+    }
+
+    fn codepoint(point: Point) error{TokenProblem}!u21 {
+        var idx: usize = 0;
+        while (idx < point.slice.len and std.ascii.isHex(point.slice[idx])) : (idx += 1) {}
+        return std.fmt.parseInt(u21, point.slice[0..idx], 16) catch {
+            return error.TokenProblem;
+        };
+    }
 };
 
 fn encodeOne(buf: []u8, slice: []const u8) error{TokenProblem}![]const u8 {
@@ -252,6 +272,27 @@ pub const Range = struct {
             try list.appendSlice(allocator, buf[0..len]);
         }
     }
+
+    pub fn appendCodepoints(range: Range, allocator: Allocator, list: *CodepointList) DecodeError!void {
+        var idx: usize = 0;
+        while (std.ascii.isHex(range.slice[idx])) : (idx += 1) {}
+        const start = std.fmt.parseInt(u21, range.slice[0..idx], 16) catch {
+            return error.TokenProblem;
+        };
+        assert(range.slice[idx] == '.');
+        idx += 1;
+        assert(range.slice[idx] == '.');
+        idx += 1;
+        const two = idx;
+        while (idx < range.slice.len and std.ascii.isHex(range.slice[idx])) : (idx += 1) {}
+        const end = std.fmt.parseInt(u21, range.slice[two..idx], 16) catch {
+            return error.TokenProblem;
+        };
+        for (start..end + 1) |cp_usize| {
+            const codepoint: u21 = @intCast(cp_usize);
+            try list.append(allocator, codepoint);
+        }
+    }
 };
 
 pub const Label = struct {
@@ -280,6 +321,17 @@ pub const Sequence = struct {
             if (tok.len == 0) continue;
             const utf8 = encodeOne(&buf, tok);
             try list.appendSlice(allocator, utf8);
+        }
+    }
+
+    pub fn appendCodepoints(seq: Sequence, allocator: Allocator, list: *CodepointList) !void {
+        var iter = std.mem.splitScalar(u8, seq.slice, ' ');
+        while (iter.next()) |tok| {
+            if (tok.len == 0) continue;
+            const codepoint = std.fmt.parseInt(u21, tok, 16) catch {
+                return error.TokenProblem;
+            };
+            try list.append(allocator, codepoint);
         }
     }
 };
@@ -333,10 +385,33 @@ pub const StringMap = struct {
     pub fn format(str_map: *StringMap, _: []const u8, _: FmtOps, writer: anytype) !void {
         var iter = str_map.iterator();
         while (iter.next()) |entry| {
-            try writer.print("pub const {s} = {};\n\n", .{ entry.key_ptr.*, esc_string(entry.value_ptr.items) });
+            try writer.print("pub const {s} = {f};\n\n", .{ entry.key_ptr.*, esc_string(entry.value_ptr.items) });
         }
     }
 };
+
+pub const CodepointMap = struct {
+    allocator: Allocator,
+    map: CodepointHash = .empty,
+
+    pub fn get(cp_map: *CodepointMap, key: []const u8) !*CodepointList {
+        if (cp_map.map.getPtr(key)) |ptr| {
+            return ptr;
+        }
+        const key_clone = try cp_map.allocator.dupe(u8, key);
+        const new_map: CodepointList = .empty;
+        try cp_map.map.put(cp_map.allocator, key_clone, new_map);
+        return cp_map.map.getPtr(key).?;
+    }
+};
+
+pub fn writeCodepointArray(writer: anytype, name: []const u8, codepoints: []const u21) !void {
+    try writer.print("pub const {s}: [{d}]u21 = .{{ ", .{ name, codepoints.len });
+    for (codepoints) |codepoint| {
+        try writer.print("0x{X}, ", .{codepoint});
+    }
+    try writer.writeAll("};\n");
+}
 
 const Alias = union(enum) {
     alias: []const u8,
@@ -350,8 +425,8 @@ pub fn propertyMap(allocator: Allocator) !PropertyMap {
     {
         var in_file = try std.fs.cwd().openFile("UCD/PropertyValueAliases.txt", .{});
         defer in_file.close();
-        var in_buf = std.io.bufferedReader(in_file.reader());
-        const in_reader = in_buf.reader();
+        var in_buf: [4096]u8 = undefined;
+        const in_reader = in_file.reader(&in_buf);
         var line_iter: LineIterator(@TypeOf(in_reader)) = .{ .read = in_reader };
         scan: while (try line_iter.next()) |tok_iter_const| {
             var tok_iter = tok_iter_const;
@@ -380,7 +455,7 @@ pub fn propertyMap(allocator: Allocator) !PropertyMap {
                                 continue :scan;
                             }
 
-                            std.debug.panic("Unexpected {s} {} on line {d}\n{s}\n", .{
+                            std.debug.panic("Unexpected {s} {any} on line {d}\n{s}\n", .{
                                 @tagName(alias),
                                 alias,
                                 line_iter.line,
@@ -415,9 +490,11 @@ pub fn propertyMap(allocator: Allocator) !PropertyMap {
 const std = @import("std");
 const assert = std.debug.assert;
 const TextList = std.ArrayListUnmanaged(u8);
+const CodepointList = std.ArrayListUnmanaged(u21);
 const AliasesList = std.ArrayListUnmanaged([]const u8);
 const Allocator = std.mem.Allocator;
 const StringHash = std.StringHashMapUnmanaged(TextList);
+const CodepointHash = std.StringHashMapUnmanaged(CodepointList);
 const FmtOps = std.fmt.FormatOptions;
 
 const AliasMap = std.StringHashMapUnmanaged(Alias);
@@ -426,6 +503,6 @@ pub const PropertyMap = std.StringHashMapUnmanaged(AliasMap);
 
 const esc_string = ezcaper.escStringExact;
 
-const RuneSet = runeset.RuneSet;
+const RuneSet = runeset.runeset.RuneSet;
 
 pub const RuneMap = std.StringHashMapUnmanaged(RuneSet);
