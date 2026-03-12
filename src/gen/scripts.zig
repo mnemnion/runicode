@@ -102,6 +102,7 @@ pub fn main() !void {
             var str_write = str_buf.writer();
             try str_write.writeAll(header_txt);
             try str_write.writeAll("const RuneSet = @import(\"runeset\").runeset;\n\n");
+            try str_write.print("// Length: {d}.\n", .{rune.body.len});
             try rune.serialize(str_write, .public, key);
             try str_buf.flush();
         }
@@ -255,6 +256,7 @@ pub fn main() !void {
             var str_write = str_buf.writer();
             try str_write.writeAll(header_txt);
             try str_write.writeAll("const RuneSet = @import(\"runeset\").runeset;\n\n");
+            try str_write.print("// Length: {d}.\n", .{rune.body.len});
             try rune.serialize(str_write, .public, key);
             try str_buf.flush();
         }
