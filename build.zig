@@ -35,9 +35,11 @@ pub fn build(b: *std.Build) void {
     {
         const gen_cat_exe = b.addExecutable(.{
             .name = "gen_cat",
-            .target = target,
-            .optimize = optimize,
-            .root_source_file = b.path("src/gen/gen_cat.zig"),
+            .root_module = b.createModule(.{
+                .target = target,
+                .optimize = optimize,
+                .root_source_file = b.path("src/gen/gen_cat.zig"),
+            }),
         });
 
         gen_cat_exe.root_module.addImport("ucd-tools", tool_mod);
@@ -55,9 +57,11 @@ pub fn build(b: *std.Build) void {
     {
         const scripts_exe = b.addExecutable(.{
             .name = "scripts",
-            .target = target,
-            .optimize = optimize,
-            .root_source_file = b.path("src/gen/scripts.zig"),
+            .root_module = b.createModule(.{
+                .target = target,
+                .optimize = optimize,
+                .root_source_file = b.path("src/gen/scripts.zig"),
+            }),
         });
 
         scripts_exe.root_module.addImport("ucd-tools", tool_mod);
@@ -75,9 +79,11 @@ pub fn build(b: *std.Build) void {
     {
         const blocks_exe = b.addExecutable(.{
             .name = "blocks",
-            .target = target,
-            .optimize = optimize,
-            .root_source_file = b.path("src/gen/blocks.zig"),
+            .root_module = b.createModule(.{
+                .target = target,
+                .optimize = optimize,
+                .root_source_file = b.path("src/gen/blocks.zig"),
+            }),
         });
 
         blocks_exe.root_module.addImport("ucd-tools", tool_mod);
@@ -95,9 +101,11 @@ pub fn build(b: *std.Build) void {
     {
         const props_exe = b.addExecutable(.{
             .name = "props",
-            .target = target,
-            .optimize = optimize,
-            .root_source_file = b.path("src/gen/props.zig"),
+            .root_module = b.createModule(.{
+                .target = target,
+                .optimize = optimize,
+                .root_source_file = b.path("src/gen/props.zig"),
+            }),
         });
 
         props_exe.root_module.addImport("ucd-tools", tool_mod);
@@ -120,9 +128,11 @@ pub fn build(b: *std.Build) void {
     });
 
     const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/runicode.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/runicode.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
