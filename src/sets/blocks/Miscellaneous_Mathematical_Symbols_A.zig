@@ -3,4 +3,5 @@
 
 const RuneSet = @import("runeset").runeset;
 
+// Length: 6.
 pub const Miscellaneous_Mathematical_Symbols_A = RuneSet{ .body = &.{ 0x0, 0x0, 0x400000000, 0x0, 0x80000000, 0xffffffffffff } };

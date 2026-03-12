@@ -1,0 +1,4 @@
+//! Generated source!
+//! Do not modify!
+
+pub const Emoji_Modifier: [5]u21 = .{ 0x1F3FB, 0x1F3FC, 0x1F3FD, 0x1F3FE, 0x1F3FF, };

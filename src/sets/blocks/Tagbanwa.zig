@@ -3,4 +3,5 @@
 
 const RuneSet = @import("runeset").runeset;
 
+// Length: 6.
 pub const Tagbanwa = RuneSet{ .body = &.{ 0x0, 0x0, 0x200000000, 0x0, 0x20000000, 0xffffffff00000000 } };

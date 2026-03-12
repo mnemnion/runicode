@@ -3,4 +3,5 @@
 
 const RuneSet = @import("runeset").runeset;
 
+// Length: 10.
 pub const Osage = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000003000, 0x8, 0x812, 0x1000000, 0x10000, 0xc0000, 0xffff000000000000, 0xfffffffff0fffff } };

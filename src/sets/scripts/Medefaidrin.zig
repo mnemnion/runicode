@@ -3,4 +3,5 @@
 
 const RuneSet = @import("runeset").runeset;
 
+// Length: 8.
 pub const Medefaidrin = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x400000, 0x600000000000000, 0xffffffffffffffff, 0x7ffffff } };

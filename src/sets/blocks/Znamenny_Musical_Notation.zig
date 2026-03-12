@@ -3,4 +3,5 @@
 
 const RuneSet = @import("runeset").runeset;
 
+// Length: 10.
 pub const Znamenny_Musical_Notation = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x10000000, 0xf000000000000000, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffff } };

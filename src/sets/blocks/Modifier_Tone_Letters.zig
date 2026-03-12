@@ -3,4 +3,5 @@
 
 const RuneSet = @import("runeset").runeset;
 
+// Length: 6.
 pub const Modifier_Tone_Letters = RuneSet{ .body = &.{ 0x0, 0x0, 0x40000000000, 0x0, 0x10000000, 0xffffffff } };

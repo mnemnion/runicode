@@ -3,4 +3,5 @@
 
 const RuneSet = @import("runeset").runeset;
 
+// Length: 8.
 pub const Indic_Siyaq_Numbers = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000000000000, 0x6, 0x40000000, 0x6000000000000, 0xffff000000000000, 0xffffffffffffffff } };
