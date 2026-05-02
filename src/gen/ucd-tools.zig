@@ -17,6 +17,54 @@ pub fn ltString(_: void, l: []const u8, r: []const u8) bool {
     return std.mem.order(u8, l, r) == .lt;
 }
 
+pub fn normalizePropName(name: []const u8, buf: []u8) ?usize {
+    const start = prefixlessPropNameStart(name) orelse return null;
+    var len: usize = 0;
+    var pending_sep = false;
+
+    for (name[start..]) |byte| {
+        switch (byte) {
+            ' ', '_', '-' => {
+                pending_sep = len != 0;
+            },
+            'A'...'Z', 'a'...'z', '0'...'9' => {
+                if (pending_sep) {
+                    if (len == buf.len) return null;
+                    buf[len] = '_';
+                    len += 1;
+                    pending_sep = false;
+                }
+                if (len == buf.len) return null;
+                buf[len] = std.ascii.toLower(byte);
+                len += 1;
+            },
+            else => return null,
+        }
+    }
+
+    return len;
+}
+
+fn prefixlessPropNameStart(name: []const u8) ?usize {
+    var idx: usize = 0;
+    while (idx < name.len and isLoosePropNameSeparator(name[idx])) : (idx += 1) {}
+
+    if (idx + 2 > name.len or
+        std.ascii.toLower(name[idx]) != 'i' or
+        std.ascii.toLower(name[idx + 1]) != 's')
+    {
+        return idx;
+    }
+
+    var probe = idx + 2;
+    while (probe < name.len and isLoosePropNameSeparator(name[probe])) : (probe += 1) {}
+    return if (probe < name.len) idx + 2 else idx;
+}
+
+fn isLoosePropNameSeparator(byte: u8) bool {
+    return byte == ' ' or byte == '_' or byte == '-';
+}
+
 // TODO: A data structure for PropertyValueAliases, it's going to get used
 // in a lot of places.
 
@@ -485,6 +533,39 @@ pub fn propertyMap(io: std.Io, allocator: Allocator) !PropertyMap {
         }
     }
     return prop_map;
+}
+
+test "normalizePropName lowercases and collapses loose matching separators" {
+    var buf: [64]u8 = undefined;
+
+    const len = normalizePropName("Script-Extensions", &buf).?;
+
+    try std.testing.expectEqualStrings("script_extensions", buf[0..len]);
+}
+
+test "normalizePropName ignores a single initial is prefix" {
+    var buf: [64]u8 = undefined;
+
+    const len = normalizePropName("Is_Greek", &buf).?;
+
+    try std.testing.expectEqualStrings("greek", buf[0..len]);
+}
+
+test "normalizePropName rejects printable ascii outside Unicode names" {
+    var buf: [64]u8 = undefined;
+
+    try std.testing.expectEqual(null, normalizePropName("lb=BA", &buf));
+    try std.testing.expectEqual(null, normalizePropName("General.Category", &buf));
+}
+
+test "normalizePropName rejects short buffers and non-printable ascii" {
+    var short_buf: [4]u8 = undefined;
+    try std.testing.expectEqual(null, normalizePropName("General_Category", &short_buf));
+
+    var buf: [64]u8 = undefined;
+    try std.testing.expectEqual(null, normalizePropName("General\tCategory", &buf));
+    try std.testing.expectEqual(null, normalizePropName("General\x7fCategory", &buf));
+    try std.testing.expectEqual(null, normalizePropName("General\xc2\xa0Category", &buf));
 }
 
 const std = @import("std");

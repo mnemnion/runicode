@@ -144,6 +144,13 @@ pub fn build(b: *std.Build) void {
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
+    const tool_unit_tests = b.addTest(.{
+        .root_module = tool_mod,
+    });
+
+    const run_tool_unit_tests = b.addRunArtifact(tool_unit_tests);
+
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
+    test_step.dependOn(&run_tool_unit_tests.step);
 }
