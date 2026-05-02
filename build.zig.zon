@@ -25,9 +25,9 @@
             // .hash = "runeset-0.9.0-XZ-DXZbBpAEqr_HVscLl1yd7Y5zx7jF4yWrOkqqiMVbk",
             .path = "../runeset",
         },
-        .runerip = .{
-            .url = "https://github.com/mnemnion/runerip/archive/refs/tags/v0.0.3.tar.gz",
-            .hash = "runerip-0.0.3-k0AJad8bAQARKzvniiqjPyCmfBZzkXCSRscNcf5cOl72",
+        .unicoder = .{
+            .url = "https://github.com/mnemnion/unicoder/archive/refs/tags/v0.1.0.tar.gz",
+            .hash = "unicoder-0.1.0-f6uOBXhTAgBMIbLye6ovm2FTayJSvGjwoHL5gpOTGhQT",
         },
     },
     .paths = .{

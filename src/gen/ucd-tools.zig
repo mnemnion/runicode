@@ -5,13 +5,13 @@
 //! With various inspirations and borrowings from zg.
 //!
 
-// TODO: Write unicoder out of runeset and use that instead of std.unicode
-
 // Forward-import ezcaper and runeset modules
 
 pub const ezcaper = @import("ezcaper");
 
 pub const runeset = @import("runeset");
+
+pub const unicoder = @import("unicoder");
 
 pub fn ltString(_: void, l: []const u8, r: []const u8) bool {
     return std.mem.order(u8, l, r) == .lt;
@@ -239,7 +239,7 @@ fn encodeOne(buf: []u8, slice: []const u8) error{TokenProblem}![]const u8 {
     const codepoint = std.fmt.parseInt(u21, slice[0..idx], 16) catch {
         return error.TokenProblem;
     };
-    const len = std.unicode.wtf8Encode(codepoint, buf) catch {
+    const len = unicoder.codepoint.toWtf8(codepoint, buf) catch {
         return error.TokenProblem;
     };
     return buf[0..len];
@@ -266,7 +266,7 @@ pub const Range = struct {
         };
         for (start..end + 1) |cp_usize| {
             const codepoint: u21 = @intCast(cp_usize);
-            const len = std.unicode.wtf8Encode(codepoint, &buf) catch {
+            const len = unicoder.codepoint.toWtf8(codepoint, &buf) catch {
                 return error.TokenProblem;
             };
             try list.appendSlice(allocator, buf[0..len]);

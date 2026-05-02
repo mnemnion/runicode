@@ -26,6 +26,13 @@ pub fn build(b: *std.Build) void {
 
     tool_mod.addImport("runeset", runeset_dep.module("runeset"));
 
+    const unicoder_dep = b.dependency("unicoder", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    tool_mod.addImport("unicoder", unicoder_dep.module("unicoder"));
+
     // Generator Steps
     //
     // I'm just going to do this directly with custom executables, rather than
