@@ -418,15 +418,15 @@ const Alias = union(enum) {
     aliases: [][]const u8,
 };
 
-pub fn propertyMap(allocator: Allocator) !PropertyMap {
+pub fn propertyMap(io: std.Io, allocator: Allocator) !PropertyMap {
     var prop_map: PropertyMap = .empty;
     var this_property: []const u8 = "";
     var alias_map: *AliasMap = undefined;
     {
-        var in_file = try std.fs.cwd().openFile("UCD/PropertyValueAliases.txt", .{});
-        defer in_file.close();
+        var in_file = try std.Io.Dir.cwd().openFile(io, "UCD/PropertyValueAliases.txt", .{});
+        defer in_file.close(io);
         var in_buf: [4096]u8 = undefined;
-        const in_reader = in_file.reader(&in_buf);
+        const in_reader = in_file.reader(io, &in_buf);
         var line_iter: LineIterator(@TypeOf(in_reader)) = .{ .read = in_reader };
         scan: while (try line_iter.next()) |tok_iter_const| {
             var tok_iter = tok_iter_const;

@@ -15,7 +15,8 @@ const LineIterator = tools.LineIterator;
 const TokenIterator = tools.TokenIterator;
 const StringMap = tools.StringMap;
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -25,10 +26,10 @@ pub fn main() !void {
     // Properties
 
     {
-        var in_file = try std.fs.cwd().openFile("UCD/PropList.txt", .{});
-        defer in_file.close();
+        var in_file = try std.Io.Dir.cwd().openFile(io, "UCD/PropList.txt", .{});
+        defer in_file.close(io);
         var in_buf: [4096]u8 = undefined;
-        const in_reader = in_file.reader(&in_buf);
+        const in_reader = in_file.reader(io, &in_buf);
         var line_iter: LineIterator(@TypeOf(in_reader)) = .{ .read = in_reader };
         while (try line_iter.next()) |tok_iter_const| {
             var tok_iter = tok_iter_const;
@@ -59,10 +60,10 @@ pub fn main() !void {
     // TODO: Synonyms from PropertyValueAliases
 
     {
-        var in_file = try std.fs.cwd().openFile("UCD/DerivedCoreProperties.txt", .{});
-        defer in_file.close();
+        var in_file = try std.Io.Dir.cwd().openFile(io, "UCD/DerivedCoreProperties.txt", .{});
+        defer in_file.close(io);
         var in_buf: [4096]u8 = undefined;
-        const in_reader = in_file.reader(&in_buf);
+        const in_reader = in_file.reader(io, &in_buf);
         var line_iter: LineIterator(@TypeOf(in_reader)) = .{ .read = in_reader };
         while (try line_iter.next()) |tok_iter_const| {
             var tok_iter = tok_iter_const;
@@ -91,10 +92,10 @@ pub fn main() !void {
     }
 
     {
-        var in_file = try std.fs.cwd().openFile("UCD/emoji/emoji-data.txt", .{});
-        defer in_file.close();
+        var in_file = try std.Io.Dir.cwd().openFile(io, "UCD/emoji/emoji-data.txt", .{});
+        defer in_file.close(io);
         var in_buf: [4096]u8 = undefined;
-        const in_reader = in_file.reader(&in_buf);
+        const in_reader = in_file.reader(io, &in_buf);
         var line_iter: LineIterator(@TypeOf(in_reader)) = .{ .read = in_reader };
         while (try line_iter.next()) |tok_iter_const| {
             var tok_iter = tok_iter_const;
@@ -126,11 +127,11 @@ pub fn main() !void {
     var path_list: TextList = TextList.init(allocator);
     // Write strings files
     {
-        const main_file = try std.fs.cwd()
-            .createFile("src/strs/CoreProperties.zig", .{ .lock = .exclusive });
-        defer main_file.close();
+        const main_file = try std.Io.Dir.cwd()
+            .createFile(io, "src/strs/CoreProperties.zig", .{ .lock = .exclusive });
+        defer main_file.close(io);
         var main_buf: [4096]u8 = undefined;
-        var main_writer = main_file.writer(&main_buf);
+        var main_writer = main_file.writer(io, &main_buf);
         const main_write = &main_writer.interface;
         try main_write.writeAll(header_txt);
         for (sorted_keys) |key| {
@@ -143,11 +144,11 @@ pub fn main() !void {
                 \\
             , .{ key, key, key });
             const str = (try string_map.get(key)).items;
-            var str_file = try std.fs.cwd()
-                .createFile(try srcPath(&path_list, "src/strs/props/", key), .{ .lock = .exclusive });
-            defer str_file.close();
+            var str_file = try std.Io.Dir.cwd()
+                .createFile(io, try srcPath(&path_list, "src/strs/props/", key), .{ .lock = .exclusive });
+            defer str_file.close(io);
             var str_buf: [4096]u8 = undefined;
-            var str_writer = str_file.writer(&str_buf);
+            var str_writer = str_file.writer(io, &str_buf);
             const str_write = &str_writer.interface;
             try str_write.writeAll(header_txt);
             try str_write.print("pub const {s} = {f};\n", .{ key, escString(str) });
@@ -163,11 +164,11 @@ pub fn main() !void {
             const this_runeset = try Runeset.createFromConstString(this_str, allocator);
             try rune_map.put(allocator, key, this_runeset);
         }
-        const main_file = try std.fs.cwd()
-            .createFile("src/sets/CoreProperties.zig", .{ .lock = .exclusive });
-        defer main_file.close();
+        const main_file = try std.Io.Dir.cwd()
+            .createFile(io, "src/sets/CoreProperties.zig", .{ .lock = .exclusive });
+        defer main_file.close(io);
         var main_buf: [4096]u8 = undefined;
-        var main_writer = main_file.writer(&main_buf);
+        var main_writer = main_file.writer(io, &main_buf);
         const main_write = &main_writer.interface;
         try main_write.writeAll(header_txt);
 
@@ -178,11 +179,11 @@ pub fn main() !void {
                 \\
             , .{ key, key, key });
             const rune = rune_map.get(key).?;
-            var str_file = try std.fs.cwd()
-                .createFile(try srcPath(&path_list, "src/sets/props/", key), .{ .lock = .exclusive });
-            defer str_file.close();
+            var str_file = try std.Io.Dir.cwd()
+                .createFile(io, try srcPath(&path_list, "src/sets/props/", key), .{ .lock = .exclusive });
+            defer str_file.close(io);
             var str_buf: [4096]u8 = undefined;
-            var str_writer = str_file.writer(&str_buf);
+            var str_writer = str_file.writer(io, &str_buf);
             const str_write = &str_writer.interface;
             try str_write.writeAll(header_txt);
             try str_write.writeAll("const RuneSet = @import(\"runeset\").runeset;\n\n");
@@ -195,11 +196,11 @@ pub fn main() !void {
 
     // Create and write CoreProperties enum
     {
-        const main_file = try std.fs.cwd()
-            .createFile("src/enums/CoreProperties.zig", .{ .lock = .exclusive });
-        defer main_file.close();
+        const main_file = try std.Io.Dir.cwd()
+            .createFile(io, "src/enums/CoreProperties.zig", .{ .lock = .exclusive });
+        defer main_file.close(io);
         var main_buf: [4096]u8 = undefined;
-        var main_writer = main_file.writer(&main_buf);
+        var main_writer = main_file.writer(io, &main_buf);
         const main_write = &main_writer.interface;
         try main_write.writeAll(header_txt);
         try main_write.writeAll("pub const CorePropertyKind = enum {\n");
@@ -212,12 +213,12 @@ pub fn main() !void {
     }
     // Write codepoint files
     {
-        try std.fs.cwd().makePath("src/codepoints/props");
-        const main_file = try std.fs.cwd()
-            .createFile("src/codepoints/CoreProperties.zig", .{ .lock = .exclusive });
-        defer main_file.close();
+        try std.Io.Dir.cwd().createDirPath(io, "src/codepoints/props");
+        const main_file = try std.Io.Dir.cwd()
+            .createFile(io, "src/codepoints/CoreProperties.zig", .{ .lock = .exclusive });
+        defer main_file.close(io);
         var main_buf: [4096]u8 = undefined;
-        var main_writer = main_file.writer(&main_buf);
+        var main_writer = main_file.writer(io, &main_buf);
         const main_write = &main_writer.interface;
         try main_write.writeAll(header_txt);
         for (sorted_keys) |key| {
@@ -227,11 +228,11 @@ pub fn main() !void {
                 \\
             , .{ key, key, key });
             const codepoints = (try codepoint_map.get(key)).items;
-            var cp_file = try std.fs.cwd()
-                .createFile(try srcPath(&path_list, "src/codepoints/props/", key), .{ .lock = .exclusive });
-            defer cp_file.close();
+            var cp_file = try std.Io.Dir.cwd()
+                .createFile(io, try srcPath(&path_list, "src/codepoints/props/", key), .{ .lock = .exclusive });
+            defer cp_file.close(io);
             var cp_buf: [4096]u8 = undefined;
-            var cp_writer = cp_file.writer(&cp_buf);
+            var cp_writer = cp_file.writer(io, &cp_buf);
             const cp_write = &cp_writer.interface;
             try cp_write.writeAll(header_txt);
             try tools.writeCodepointArray(cp_write, key, codepoints);
@@ -242,13 +243,16 @@ pub fn main() !void {
 
     // This just gives visible output as a signal that the job was done.
     {
-        const writer = std.fs.File.stdout().deprecatedWriter();
+        var stdout_buf: [64]u8 = undefined;
+        var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
+        const writer = &stdout_writer.interface;
         for (sorted_keys) |key| {
-            std.debug.print("{s} ", .{key});
+            try writer.print("{s} ", .{key});
         }
-        try writer.print("\n", .{});
+        try writer.writeByte('\n');
+        try writer.flush();
     }
-    std.process.cleanExit();
+    std.process.cleanExit(io);
 }
 
 const header_txt =

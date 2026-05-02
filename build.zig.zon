@@ -8,7 +8,7 @@
 
     // This is currently advisory only; Zig does not yet do anything
     // with this value.
-    .minimum_zig_version = "0.14.0",
+    .minimum_zig_version = "0.16.0",
 
     // This field is optional.
     // Each dependency must either provide a `url` and `hash`, or a `path`.
@@ -21,8 +21,9 @@
             .hash = "ezcaper-0.3.0-kd9_icCWAAAgzriNtlOgV8G5sBmD9nr8mnmo4zFNQQiq",
         },
         .runeset = .{
-            .url = "https://github.com/mnemnion/runeset/archive/refs/tags/v0.9.3.tar.gz",
-            .hash = "runeset-0.9.0-XZ-DXZbBpAEqr_HVscLl1yd7Y5zx7jF4yWrOkqqiMVbk",
+            // .url = "https://github.com/mnemnion/runeset/archive/refs/tags/v0.9.3.tar.gz",
+            // .hash = "runeset-0.9.0-XZ-DXZbBpAEqr_HVscLl1yd7Y5zx7jF4yWrOkqqiMVbk",
+            .path = "../runeset",
         },
         .runerip = .{
             .url = "https://github.com/mnemnion/runerip/archive/refs/tags/v0.0.3.tar.gz",
