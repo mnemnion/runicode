@@ -1,7 +1,7 @@
 //! Generated source!
 //! Do not modify!
 
-const RuneSet = @import("runeset").runeset;
+const RuneSet = @import("runeset").RuneSet;
 
 // Length: 30.
 pub const Other_Lowercase = RuneSet{ .body = &.{ 0x0, 0x0, 0x1040600002c04, 0x1b, 0x400040000000000, 0x1ff000000000000, 0x1f00000003, 0x400000000000020, 0x70000000000008, 0x2000000080026, 0x2000a4000000, 0x40010000, 0x3, 0x40000000, 0x200f0000000, 0x31c000000000000, 0x1000000000000, 0x30000000, 0x3000000000000000, 0x3ffffff0000, 0xffff000000000000, 0x1fff0000, 0x8002000000000000, 0xfffffffff8000000, 0x10007ffffffffff, 0xfffff00000000000, 0x1000000000000000, 0xffff000000000000, 0x3fffffffffff, 0x7fdffffffffffb9 } };

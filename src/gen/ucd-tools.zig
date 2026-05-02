@@ -584,6 +584,6 @@ pub const PropertyMap = std.StringHashMapUnmanaged(AliasMap);
 
 const esc_string = ezcaper.escStringExact;
 
-const RuneSet = runeset.runeset.RuneSet;
+const RuneSet = runeset.RuneSet;
 
 pub const RuneMap = std.StringHashMapUnmanaged(RuneSet);

@@ -1,7 +1,7 @@
 //! Generated source!
 //! Do not modify!
 
-const RuneSet = @import("runeset").runeset;
+const RuneSet = @import("runeset").RuneSet;
 
 // Length: 61.
 pub const Emoji = RuneSet{ .body = &.{ 0x287953333581250560, 0x0, 0x1000c00000004, 0x1e, 0x420000000000, 0x30107fc89053, 0x401, 0x80000000, 0xef08ffff3e9, 0x2800000, 0x2001000000000000, 0x210000, 0x180000e0, 0x30000000000000, 0x8001000200e00000, 0x1800b85090, 0x1801022054bf24, 0x27bf0600001ac130, 0x60030c831afc0000, 0xc8000169800fff05, 0x700c44d2132401f, 0x7800000000000001, 0x400c0000000000, 0x4, 0x70ffe0000008000, 0x1000c000000, 0x60003f00000, 0x200000400000000, 0x200, 0x1000000000000000, 0x10, 0x8000, 0xc003000000000000, 0x7fe4000, 0xffffffc000000000, 0x7fc800004000006, 0x30000, 0xfffffff3ffffffff, 0xffffffffffffffff, 0xffffffffcecfffff, 0xffb9ffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xbfffffffffffffff, 0x3fffffffffffffff, 0x7f980ffffff7e00, 0x1006013000613c80, 0xfc08810a700e001c, 0xffffffffffffffff, 0xffff, 0xffffffffffffffff, 0x1ff91a3ff0e7f83f, 0x10fff00000000, 0xf7fffffffffff000, 0xffffffffffffffbf, 0xffffffffffffffff, 0xffffffffffffffff, 0x1fff000000000000, 0xffffffffffff83ff, 0x1ff03ff9fffc07f } };

@@ -1,7 +1,7 @@
 //! Generated source!
 //! Do not modify!
 
-const RuneSet = @import("runeset").runeset;
+const RuneSet = @import("runeset").RuneSet;
 
 // Length: 30.
 pub const Greek = RuneSet{ .body = &.{ 0x0, 0x0, 0x104060000f004, 0x1a, 0x80000000000000, 0x80153, 0xbcff000000000024, 0xfffffffbffffd750, 0xffff0003ffffffff, 0xf0f0000000000000, 0x12, 0x200000000000, 0x20010000, 0x300, 0x60, 0x2000000000, 0x4000000000, 0x20000000, 0x7fdcffffefcfffdf, 0xffdfffffffffffff, 0x3fffffffaaff3f3f, 0xffffffff3f3fffff, 0x3, 0x8000000000000000, 0x7c3e0000000, 0x7c000000000, 0xffffffffffffffff, 0x3f, 0xffffffffffffffff, 0x100007fff } };

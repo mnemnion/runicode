@@ -8,7 +8,7 @@ const tools = @import("ucd-tools");
 const escString = tools.ezcaper.escStringExactQuoted;
 
 const CodepointMap = tools.CodepointMap;
-const Runeset = tools.runeset.runeset.RuneSet;
+const Runeset = tools.runeset.RuneSet;
 const RuneMap = tools.RuneMap;
 
 const LineIterator = tools.LineIterator;
@@ -186,7 +186,7 @@ pub fn main(init: std.process.Init) !void {
             var str_writer = str_file.writer(io, &str_buf);
             const str_write = &str_writer.interface;
             try str_write.writeAll(header_txt);
-            try str_write.writeAll("const RuneSet = @import(\"runeset\").runeset;\n\n");
+            try str_write.writeAll("const RuneSet = @import(\"runeset\").RuneSet;\n\n");
             try str_write.print("// Length: {d}.\n", .{rune.body.len});
             try rune.serialize(str_write, .public, key);
             try str_write.flush();

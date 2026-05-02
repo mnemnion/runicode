@@ -1,7 +1,7 @@
 //! Generated source!
 //! Do not modify!
 
-const RuneSet = @import("runeset").runeset;
+const RuneSet = @import("runeset").RuneSet;
 
 // Length: 89.
 pub const Extended_Pictographic = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000c00000004, 0x1f, 0x420000000000, 0x30107fc8d053, 0x401, 0x80000000, 0xffff0fffafffffff, 0x2800000, 0x2001000000000000, 0x210000, 0x180000e0, 0x30000000000000, 0x8001000200e00000, 0xf800b85090, 0x1801022057ff3f, 0xffffffffffffffff, 0xffffffffffff003f, 0xffffffffffffffff, 0xfffffffffff7ffbf, 0x7800000000000001, 0x400c0000000000, 0x4, 0x70ffe0000008000, 0x100, 0x1000c000000, 0x60003f00000, 0x200000400000000, 0x200, 0x1000000000000000, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0x80000000e000, 0xc003f00000000000, 0xffffe00007fe4000, 0x3fffffffff, 0xf7fc80000400fffe, 0xfffffffffffffe00, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0x7ffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0x3fffffffffffffff, 0xffffffffffffffc0, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xfff0000000000000, 0xffffffffffe00000, 0xf000, 0xfc00ff00, 0xffffc0000000ff00, 0xffffffffffffffff, 0xf7fffffffffff000, 0xffffffffffffffbf, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0x3fffffffffffffff } };

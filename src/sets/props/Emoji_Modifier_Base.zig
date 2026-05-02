@@ -1,7 +1,7 @@
 //! Generated source!
 //! Do not modify!
 
-const RuneSet = @import("runeset").runeset;
+const RuneSet = @import("runeset").RuneSet;
 
 // Length: 24.
 pub const Emoji_Modifier_Base = RuneSet{ .body = &.{ 0x0, 0x0, 0x1000400000000, 0xa, 0x19000000, 0x80000000, 0x8f00e66c000, 0x3c00, 0x200000000000000, 0x20000000, 0x20, 0x1c9c, 0x11ffffc00001ffcc, 0x400000280ee, 0x430000000000000, 0x610000, 0xf8e0, 0x70000800000000, 0x1001, 0x73ff0040ff009000, 0x80000000000000, 0xb60000000000000, 0x3ffee000, 0x1ff000000000038 } };
