@@ -13,56 +13,15 @@ pub const runeset = @import("runeset");
 
 pub const unicoder = @import("unicoder");
 
+pub const props_map = @import("props_map.zig");
+pub const normalizePropName = props_map.normalizePropName;
+
+comptime {
+    std.testing.refAllDecls(props_map);
+}
+
 pub fn ltString(_: void, l: []const u8, r: []const u8) bool {
     return std.mem.order(u8, l, r) == .lt;
-}
-
-pub fn normalizePropName(name: []const u8, buf: []u8) ?usize {
-    const start = prefixlessPropNameStart(name) orelse return null;
-    var len: usize = 0;
-    var pending_sep = false;
-
-    for (name[start..]) |byte| {
-        switch (byte) {
-            ' ', '_', '-' => {
-                pending_sep = len != 0;
-            },
-            'A'...'Z', 'a'...'z', '0'...'9' => {
-                if (pending_sep) {
-                    if (len == buf.len) return null;
-                    buf[len] = '_';
-                    len += 1;
-                    pending_sep = false;
-                }
-                if (len == buf.len) return null;
-                buf[len] = std.ascii.toLower(byte);
-                len += 1;
-            },
-            else => return null,
-        }
-    }
-
-    return len;
-}
-
-fn prefixlessPropNameStart(name: []const u8) ?usize {
-    var idx: usize = 0;
-    while (idx < name.len and isLoosePropNameSeparator(name[idx])) : (idx += 1) {}
-
-    if (idx + 2 > name.len or
-        std.ascii.toLower(name[idx]) != 'i' or
-        std.ascii.toLower(name[idx + 1]) != 's')
-    {
-        return idx;
-    }
-
-    var probe = idx + 2;
-    while (probe < name.len and isLoosePropNameSeparator(name[probe])) : (probe += 1) {}
-    return if (probe < name.len) idx + 2 else idx;
-}
-
-fn isLoosePropNameSeparator(byte: u8) bool {
-    return byte == ' ' or byte == '_' or byte == '-';
 }
 
 // TODO: A data structure for PropertyValueAliases, it's going to get used

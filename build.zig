@@ -26,6 +26,24 @@ pub fn build(b: *std.Build) void {
 
     tool_mod.addImport("runeset", runeset_dep.module("runeset"));
 
+    const test_gencat_mod = b.addModule("test-gencat", .{
+        .root_source_file = b.path("src/sets/GeneralCategory.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    test_gencat_mod.addImport("runeset", runeset_dep.module("runeset"));
+    tool_mod.addImport("test-gencat", test_gencat_mod);
+
+    const test_scripts_mod = b.addModule("test-scripts", .{
+        .root_source_file = b.path("src/sets/Scripts.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    test_scripts_mod.addImport("runeset", runeset_dep.module("runeset"));
+    tool_mod.addImport("test-scripts", test_scripts_mod);
+
     const unicoder_dep = b.dependency("unicoder", .{
         .target = target,
         .optimize = optimize,
