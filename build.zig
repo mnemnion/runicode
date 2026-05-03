@@ -44,6 +44,14 @@ pub fn build(b: *std.Build) void {
     test_scripts_mod.addImport("runeset", runeset_dep.module("runeset"));
     tool_mod.addImport("test-scripts", test_scripts_mod);
 
+    const test_codepoints_gencat_mod = b.addModule("test-codepoints-gencat", .{
+        .root_source_file = b.path("src/codepoints/GeneralCategory.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    tool_mod.addImport("test-codepoints-gencat", test_codepoints_gencat_mod);
+
     const unicoder_dep = b.dependency("unicoder", .{
         .target = target,
         .optimize = optimize,

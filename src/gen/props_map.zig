@@ -5,7 +5,9 @@ const runeset = @import("runeset");
 
 const RuneSet = runeset.RuneSet;
 
-pub fn NamedRuneSetMap(comptime Source: type) type {
+pub const NamedRuneSetMap = NamedMap;
+
+pub fn NamedMap(comptime Source: type) type {
     comptime {
         const decls = sourceDecls(Source);
         if (decls.len == 0) {
@@ -14,24 +16,22 @@ pub fn NamedRuneSetMap(comptime Source: type) type {
 
         @setEvalBranchQuota(evalBranchQuota(decls.len));
 
-        const Value = @TypeOf(@field(Source, decls[0].name));
-        if (Value != RuneSet) {
-            @compileError("NamedRuneSetMap currently supports only RuneSet declarations");
-        }
+        const First = @TypeOf(@field(Source, decls[0].name));
+        const Value = mapValueType(First);
 
         var key_bufs: [decls.len][128]u8 = undefined;
         var key_lens: [decls.len]usize = undefined;
         var values: [decls.len]Value = undefined;
         for (decls, 0..) |decl, idx| {
             const value = @field(Source, decl.name);
-            if (@TypeOf(value) != Value) {
-                @compileError("NamedRuneSetMap requires every declaration to have the same type");
+            if (!fitsMapValueType(@TypeOf(value), First)) {
+                @compileError("NamedMap requires every declaration to have the same type");
             }
             const len = normalizePropName(decl.name, &key_bufs[idx]) orelse {
                 @compileError("declaration name cannot be normalized: " ++ decl.name);
             };
             key_lens[idx] = len;
-            values[idx] = value;
+            values[idx] = mapValue(value, Value);
         }
 
         const final_key_bufs = key_bufs;
@@ -55,10 +55,35 @@ pub fn NamedRuneSetMap(comptime Source: type) type {
     }
 }
 
+fn mapValueType(comptime Decl: type) type {
+    return switch (@typeInfo(Decl)) {
+        .array => |array| []const array.child,
+        else => Decl,
+    };
+}
+
+fn fitsMapValueType(comptime Decl: type, comptime First: type) bool {
+    const first_info = @typeInfo(First);
+    return switch (first_info) {
+        .array => |first_array| switch (@typeInfo(Decl)) {
+            .array => |array| array.child == first_array.child,
+            else => false,
+        },
+        else => Decl == First,
+    };
+}
+
+fn mapValue(comptime value: anytype, comptime Value: type) Value {
+    return switch (@typeInfo(@TypeOf(value))) {
+        .array => value[0..],
+        else => value,
+    };
+}
+
 fn sourceDecls(comptime Source: type) []const std.builtin.Type.Declaration {
     const source_info = @typeInfo(Source);
     if (source_info != .@"struct") {
-        @compileError("NamedRuneSetMap requires a struct or namespace type");
+        @compileError("NamedMap requires a struct or namespace type");
     }
     return source_info.@"struct".decls;
 }
@@ -122,33 +147,53 @@ const TestSets = struct {
     pub const Latin_Extended_A = RuneSet{ .body = &.{ 5, 6, 7, 8 } };
 };
 
-test "NamedRuneSetMap looks up RuneSets with loose matching" {
-    var map = NamedRuneSetMap(TestSets){};
+const TestCodepoints = struct {
+    pub const Lu = [_]u21{ 0x41, 0x42 };
+    pub const Lowercase_Letter = [_]u21{ 0x61, 0x62, 0x63 };
+};
+
+test "NamedMap looks up RuneSets with loose matching" {
+    var map = NamedMap(TestSets){};
 
     try std.testing.expect((map.get("Greek") orelse unreachable).equalTo(TestSets.Greek));
     try std.testing.expect((map.get("latin extended a") orelse unreachable).equalTo(TestSets.Latin_Extended_A));
     try std.testing.expect((map.get("Is-Latin_Extended_A") orelse unreachable).equalTo(TestSets.Latin_Extended_A));
 }
 
-test "NamedRuneSetMap returns null for invalid names and misses" {
-    var map = NamedRuneSetMap(TestSets){};
+test "NamedMap returns null for invalid names and misses" {
+    var map = NamedMap(TestSets){};
 
     try std.testing.expectEqual(null, map.get("Greek!"));
     try std.testing.expectEqual(null, map.get("Not_A_Script"));
 }
 
-test "NamedRuneSetMap handles generated RuneSet namespaces" {
+test "NamedMap looks up array declarations as slices" {
+    var map = NamedMap(TestCodepoints){};
+
+    try std.testing.expectEqualSlices(u21, &TestCodepoints.Lu, map.get("Lu") orelse unreachable);
+    try std.testing.expectEqualSlices(u21, &TestCodepoints.Lowercase_Letter, map.get("lowercase letter") orelse unreachable);
+}
+
+test "NamedMap handles generated RuneSet namespaces" {
     const GeneralCategory = @import("test-gencat");
-    var map = NamedRuneSetMap(GeneralCategory){};
+    var map = NamedMap(GeneralCategory){};
 
     try std.testing.expect((map.get("Uppercase Letter") orelse unreachable).equalTo(GeneralCategory.Lu));
     try std.testing.expect((map.get("is-private-use") orelse unreachable).equalTo(GeneralCategory.Co));
 }
 
-test "NamedRuneSetMap handles larger generated RuneSet namespaces" {
+test "NamedMap handles larger generated RuneSet namespaces" {
     const Scripts = @import("test-scripts");
-    var map = NamedRuneSetMap(Scripts){};
+    var map = NamedMap(Scripts){};
 
     try std.testing.expect((map.get("Greek") orelse unreachable).equalTo(Scripts.Greek));
     try std.testing.expect((map.get("is old-persian") orelse unreachable).equalTo(Scripts.Old_Persian));
+}
+
+test "NamedMap handles generated array namespaces" {
+    const GeneralCategory = @import("test-codepoints-gencat");
+    var map = NamedMap(GeneralCategory){};
+
+    try std.testing.expectEqualSlices(u21, &GeneralCategory.Lu, map.get("Uppercase Letter") orelse unreachable);
+    try std.testing.expectEqualSlices(u21, &GeneralCategory.Co, map.get("is-private-use") orelse unreachable);
 }
