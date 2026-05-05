@@ -13,6 +13,8 @@ pub const sets = struct {
     pub const Scripts = @import("sets/Scripts.zig");
     /// Unicode script extension sets.
     pub const ScriptsExtended = @import("sets/ScriptsExtended.zig");
+    /// All assigned, public, character codepoints.
+    pub const supremum = @import("sets/supremum.zig");
 
     /// Loose-matching maps for Unicode RuneSet property namespaces.
     pub const map = struct {
@@ -41,6 +43,8 @@ pub const codepoints = struct {
     pub const Scripts = @import("codepoints/Scripts.zig");
     /// Unicode script extension codepoints.
     pub const ScriptsExtended = @import("codepoints/ScriptsExtended.zig");
+    /// All assigned, public, character codepoints.
+    pub const supremum = @import("codepoints/supremum.zig");
 
     /// Loose-matching maps for Unicode codepoint property namespaces.
     pub const map = struct {
@@ -69,6 +73,8 @@ pub const strs = struct {
     pub const Scripts = @import("strs/Scripts.zig");
     /// Unicode script extension strings.
     pub const ScriptsExtended = @import("strs/ScriptsExtended.zig");
+    /// All assigned, public, character codepoints.
+    pub const supremum = @import("strs/supremum.zig");
 
     /// Loose-matching maps for Unicode string property namespaces.
     pub const map = struct {

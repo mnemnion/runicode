@@ -109,6 +109,51 @@ pub fn main(init: std.process.Init) !void {
             const this_runeset = try Runeset.createFromConstString(this_str, allocator);
             try rune_map.put(allocator, key, this_runeset);
         }
+
+        {
+            var supremum_str = TextList.init(allocator);
+            var supremum_codepoints = std.array_list.Managed(u21).init(allocator);
+            for (sorted_keys) |key| {
+                if (!isSupremumGeneralCategory(key)) continue;
+                try supremum_str.appendSlice((try string_map.get(key)).items);
+                try supremum_codepoints.appendSlice((try codepoint_map.get(key)).items);
+            }
+            std.mem.sort(u21, supremum_codepoints.items, {}, ltCodepoint);
+            const supremum_runeset = try Runeset.createFromConstString(supremum_str.items, allocator);
+
+            const strs_supremum_file = try std.Io.Dir.cwd()
+                .createFile(io, "src/strs/supremum.zig", .{ .lock = .exclusive });
+            defer strs_supremum_file.close(io);
+            var strs_supremum_buf: [4096]u8 = undefined;
+            var strs_supremum_writer = strs_supremum_file.writer(io, &strs_supremum_buf);
+            const strs_supremum_write = &strs_supremum_writer.interface;
+            try strs_supremum_write.writeAll(header_txt);
+            try strs_supremum_write.print("pub const assigned_public = {f};\n", .{escString(supremum_str.items)});
+            try strs_supremum_write.flush();
+
+            const sets_supremum_file = try std.Io.Dir.cwd()
+                .createFile(io, "src/sets/supremum.zig", .{ .lock = .exclusive });
+            defer sets_supremum_file.close(io);
+            var sets_supremum_buf: [4096]u8 = undefined;
+            var sets_supremum_writer = sets_supremum_file.writer(io, &sets_supremum_buf);
+            const sets_supremum_write = &sets_supremum_writer.interface;
+            try sets_supremum_write.writeAll(header_txt);
+            try sets_supremum_write.writeAll("const RuneSet = @import(\"runeset\").RuneSet;\n\n");
+            try sets_supremum_write.print("// Length: {d}.\n", .{supremum_runeset.body.len});
+            try supremum_runeset.serialize(sets_supremum_write, .public, "assigned_public");
+            try sets_supremum_write.flush();
+
+            const codepoints_supremum_file = try std.Io.Dir.cwd()
+                .createFile(io, "src/codepoints/supremum.zig", .{ .lock = .exclusive });
+            defer codepoints_supremum_file.close(io);
+            var codepoints_supremum_buf: [4096]u8 = undefined;
+            var codepoints_supremum_writer = codepoints_supremum_file.writer(io, &codepoints_supremum_buf);
+            const codepoints_supremum_write = &codepoints_supremum_writer.interface;
+            try codepoints_supremum_write.writeAll(header_txt);
+            try tools.writeCodepointArray(codepoints_supremum_write, "assigned_public", supremum_codepoints.items);
+            try codepoints_supremum_write.flush();
+        }
+
         const main_file = try std.Io.Dir.cwd()
             .createFile(io, "src/sets/GeneralCategory.zig", .{ .lock = .exclusive });
         defer main_file.close(io);
