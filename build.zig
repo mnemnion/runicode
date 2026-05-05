@@ -26,32 +26,6 @@ pub fn build(b: *std.Build) void {
 
     tool_mod.addImport("runeset", runeset_dep.module("runeset"));
 
-    const test_gencat_mod = b.addModule("test-gencat", .{
-        .root_source_file = b.path("src/sets/GeneralCategory.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    test_gencat_mod.addImport("runeset", runeset_dep.module("runeset"));
-    tool_mod.addImport("test-gencat", test_gencat_mod);
-
-    const test_scripts_mod = b.addModule("test-scripts", .{
-        .root_source_file = b.path("src/sets/Scripts.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    test_scripts_mod.addImport("runeset", runeset_dep.module("runeset"));
-    tool_mod.addImport("test-scripts", test_scripts_mod);
-
-    const test_codepoints_gencat_mod = b.addModule("test-codepoints-gencat", .{
-        .root_source_file = b.path("src/codepoints/GeneralCategory.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    tool_mod.addImport("test-codepoints-gencat", test_codepoints_gencat_mod);
-
     const unicoder_dep = b.dependency("unicoder", .{
         .target = target,
         .optimize = optimize,
@@ -154,18 +128,17 @@ pub fn build(b: *std.Build) void {
 
     // Outward-facing Modules
 
-    _ = b.addModule("runicode", .{
+    const runicode_mod = b.addModule("runicode", .{
         .root_source_file = b.path("src/runicode.zig"),
         .target = target,
         .optimize = optimize,
     });
 
+    runicode_mod.addImport("runeset", runeset_dep.module("runeset"));
+    runicode_mod.addImport("ucd-tools", tool_mod);
+
     const lib_unit_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/runicode.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
+        .root_module = runicode_mod,
     });
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);

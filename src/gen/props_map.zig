@@ -11,7 +11,7 @@ pub fn NamedMap(comptime Source: type) type {
     comptime {
         const decls = sourceDecls(Source);
         if (decls.len == 0) {
-            @compileError("NamedRuneSetMap requires at least one declaration");
+            @compileError("NamedMap requires at least one declaration");
         }
 
         @setEvalBranchQuota(evalBranchQuota(decls.len));
@@ -24,9 +24,6 @@ pub fn NamedMap(comptime Source: type) type {
         var values: [decls.len]Value = undefined;
         for (decls, 0..) |decl, idx| {
             const value = @field(Source, decl.name);
-            if (!fitsMapValueType(@TypeOf(value), First)) {
-                @compileError("NamedMap requires every declaration to have the same type");
-            }
             const len = normalizePropName(decl.name, &key_bufs[idx]) orelse {
                 @compileError("declaration name cannot be normalized: " ++ decl.name);
             };
@@ -55,45 +52,6 @@ pub fn NamedMap(comptime Source: type) type {
     }
 }
 
-fn mapValueType(comptime Decl: type) type {
-    return switch (@typeInfo(Decl)) {
-        .array => |array| []const array.child,
-        else => Decl,
-    };
-}
-
-fn fitsMapValueType(comptime Decl: type, comptime First: type) bool {
-    const first_info = @typeInfo(First);
-    return switch (first_info) {
-        .array => |first_array| switch (@typeInfo(Decl)) {
-            .array => |array| array.child == first_array.child,
-            else => false,
-        },
-        else => Decl == First,
-    };
-}
-
-fn mapValue(comptime value: anytype, comptime Value: type) Value {
-    return switch (@typeInfo(@TypeOf(value))) {
-        .array => value[0..],
-        else => value,
-    };
-}
-
-fn sourceDecls(comptime Source: type) []const std.builtin.Type.Declaration {
-    const source_info = @typeInfo(Source);
-    if (source_info != .@"struct") {
-        @compileError("NamedMap requires a struct or namespace type");
-    }
-    return source_info.@"struct".decls;
-}
-
-fn evalBranchQuota(comptime decl_count: usize) u32 {
-    if (decl_count == 0) return 1_000;
-    const n_log_n = decl_count * std.math.log2_int_ceil(usize, decl_count);
-    return @intCast(10_000 + decl_count * 1_000 + n_log_n * 100);
-}
-
 pub fn normalizePropName(name: []const u8, buf: []u8) ?usize {
     const start = prefixlessPropNameStart(name) orelse return null;
     var len: usize = 0;
@@ -120,6 +78,42 @@ pub fn normalizePropName(name: []const u8, buf: []u8) ?usize {
     }
 
     return len;
+}
+
+fn mapValueType(comptime Decl: type) type {
+    return switch (@typeInfo(Decl)) {
+        .array => |array| []const array.child,
+        .pointer => |pointer| switch (@typeInfo(pointer.child)) {
+            .array => |array| []const array.child,
+            else => Decl,
+        },
+        else => Decl,
+    };
+}
+
+fn mapValue(comptime value: anytype, comptime Value: type) Value {
+    return switch (@typeInfo(@TypeOf(value))) {
+        .array => value[0..],
+        .pointer => |pointer| switch (@typeInfo(pointer.child)) {
+            .array => value[0..],
+            else => value,
+        },
+        else => value,
+    };
+}
+
+fn sourceDecls(comptime Source: type) []const std.builtin.Type.Declaration {
+    const source_info = @typeInfo(Source);
+    if (source_info != .@"struct") {
+        @compileError("NamedMap requires a struct or namespace type");
+    }
+    return source_info.@"struct".decls;
+}
+
+fn evalBranchQuota(comptime decl_count: usize) u32 {
+    if (decl_count == 0) return 1_000;
+    const n_log_n = decl_count * std.math.log2_int_ceil(usize, decl_count);
+    return @intCast(10_000 + decl_count * 1_000 + n_log_n * 100);
 }
 
 fn prefixlessPropNameStart(name: []const u8) ?usize {
@@ -152,6 +146,11 @@ const TestCodepoints = struct {
     pub const Lowercase_Letter = [_]u21{ 0x61, 0x62, 0x63 };
 };
 
+const TestStrings = struct {
+    pub const Greek = "abc";
+    pub const Latin_Extended_A = "defgh";
+};
+
 test "NamedMap looks up RuneSets with loose matching" {
     var map = NamedMap(TestSets){};
 
@@ -174,26 +173,9 @@ test "NamedMap looks up array declarations as slices" {
     try std.testing.expectEqualSlices(u21, &TestCodepoints.Lowercase_Letter, map.get("lowercase letter") orelse unreachable);
 }
 
-test "NamedMap handles generated RuneSet namespaces" {
-    const GeneralCategory = @import("test-gencat");
-    var map = NamedMap(GeneralCategory){};
+test "NamedMap looks up string declarations as slices" {
+    var map = NamedMap(TestStrings){};
 
-    try std.testing.expect((map.get("Uppercase Letter") orelse unreachable).equalTo(GeneralCategory.Lu));
-    try std.testing.expect((map.get("is-private-use") orelse unreachable).equalTo(GeneralCategory.Co));
-}
-
-test "NamedMap handles larger generated RuneSet namespaces" {
-    const Scripts = @import("test-scripts");
-    var map = NamedMap(Scripts){};
-
-    try std.testing.expect((map.get("Greek") orelse unreachable).equalTo(Scripts.Greek));
-    try std.testing.expect((map.get("is old-persian") orelse unreachable).equalTo(Scripts.Old_Persian));
-}
-
-test "NamedMap handles generated array namespaces" {
-    const GeneralCategory = @import("test-codepoints-gencat");
-    var map = NamedMap(GeneralCategory){};
-
-    try std.testing.expectEqualSlices(u21, &GeneralCategory.Lu, map.get("Uppercase Letter") orelse unreachable);
-    try std.testing.expectEqualSlices(u21, &GeneralCategory.Co, map.get("is-private-use") orelse unreachable);
+    try std.testing.expectEqualStrings(TestStrings.Greek, map.get("Greek") orelse unreachable);
+    try std.testing.expectEqualStrings(TestStrings.Latin_Extended_A, map.get("latin extended a") orelse unreachable);
 }

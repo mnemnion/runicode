@@ -14,6 +14,8 @@ pub const runeset = @import("runeset");
 pub const unicoder = @import("unicoder");
 
 pub const props_map = @import("props_map.zig");
+pub const NamedMap = props_map.NamedMap;
+pub const NamedRuneSetMap = props_map.NamedRuneSetMap;
 pub const normalizePropName = props_map.normalizePropName;
 
 comptime {
