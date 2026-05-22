@@ -1,5 +1,6 @@
 const std = @import("std");
 const audit = @import("ucd/audit.zig");
+const alias_data = @import("ucd/aliases.zig");
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -11,5 +12,11 @@ pub fn main(init: std.process.Init) !void {
     defer ucd_dir.close(io);
 
     try audit.auditDir(io, allocator, ucd_dir);
+    var aliases = alias_data.Aliases.init(allocator);
+    defer aliases.deinit();
+
+    try aliases.loadPropertyAliasesFile(io, ucd_dir);
+    try aliases.loadPropertyValueAliasesFile(io, ucd_dir);
+
     std.process.cleanExit(io);
 }
