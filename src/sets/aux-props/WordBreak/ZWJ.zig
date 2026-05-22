@@ -1,0 +1,7 @@
+//! Generated source!
+//! Do not modify!
+
+const RuneSet = @import("runeset").RuneSet;
+
+// Length: 6.
+pub const ZWJ = RuneSet{ .body = &.{ 0x0, 0x0, 0x400000000, 0x0, 0x1, 0x2000 } };

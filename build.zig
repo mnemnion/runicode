@@ -126,6 +126,28 @@ pub fn build(b: *std.Build) void {
         run_props_step.dependOn(&run_props.step);
     }
 
+    // Auxiliary Properties
+    {
+        const aux_props_exe = b.addExecutable(.{
+            .name = "aux_props",
+            .root_module = b.createModule(.{
+                .target = target,
+                .optimize = optimize,
+                .root_source_file = b.path("src/gen/aux_props.zig"),
+            }),
+        });
+
+        aux_props_exe.root_module.addImport("ucd-tools", tool_mod);
+
+        b.installArtifact(aux_props_exe);
+
+        const run_aux_props = b.addRunArtifact(aux_props_exe);
+
+        const run_aux_props_step = b.step("aux-props", "generate files for auxiliary properties");
+
+        run_aux_props_step.dependOn(&run_aux_props.step);
+    }
+
     // Outward-facing Modules
 
     const runicode_mod = b.addModule("runicode", .{
