@@ -78,7 +78,7 @@ pub const Aliases = struct {
 
         const property = aliases.canonicalProperty(field_list.items[0]) orelse field_list.items[0];
         const map = try aliases.valueMap(property);
-        const canonical = field_list.items[2];
+        const canonical = canonicalValueName(property, field_list.items);
         for (field_list.items[1..]) |alias| {
             try putOwned(map, aliases.allocator, alias, canonical);
         }
@@ -124,6 +124,16 @@ pub const Aliases = struct {
         return map.get(value);
     }
 };
+
+fn canonicalValueName(property: []const u8, fields: []const []const u8) []const u8 {
+    if (fields.len >= 4 and isCanonicalCombiningClass(property)) return fields[3];
+    return fields[2];
+}
+
+fn isCanonicalCombiningClass(property: []const u8) bool {
+    return std.mem.eql(u8, property, "ccc") or
+        std.mem.eql(u8, property, "Canonical_Combining_Class");
+}
 
 fn putOwned(
     map: *std.StringHashMapUnmanaged([]const u8),
@@ -187,4 +197,17 @@ test "value aliases resolve when property aliases load first" {
 
     try testing.expectEqualStrings("Uppercase_Letter", aliases.canonicalValue("gc", "Lu").?);
     try testing.expectEqualStrings("Uppercase_Letter", aliases.canonicalValue("General_Category", "Lu").?);
+}
+
+test "ccc value aliases resolve numeric short and long names to long name" {
+    var aliases = Aliases.init(testing.allocator);
+    defer aliases.deinit();
+
+    try aliases.loadPropertyLine("ccc ; Canonical_Combining_Class");
+    try aliases.loadPropertyValueLine("ccc ; 0 ; NR ; Not_Reordered");
+
+    try testing.expectEqualStrings("Not_Reordered", aliases.canonicalValue("ccc", "0").?);
+    try testing.expectEqualStrings("Not_Reordered", aliases.canonicalValue("ccc", "NR").?);
+    try testing.expectEqualStrings("Not_Reordered", aliases.canonicalValue("ccc", "Not_Reordered").?);
+    try testing.expectEqualStrings("Not_Reordered", aliases.canonicalValue("Canonical_Combining_Class", "0").?);
 }
