@@ -33,14 +33,27 @@ pub const Aliases = struct {
         aliases.properties.deinit(aliases.allocator);
     }
 
-    pub fn canonicalProperty(aliases: *Aliases, name: []const u8) ?[]const u8 {
+    pub fn canonicalProperty(aliases: *const Aliases, name: []const u8) ?[]const u8 {
         return aliases.properties.get(name);
     }
 
-    pub fn canonicalValue(aliases: *Aliases, property: []const u8, value: []const u8) ?[]const u8 {
+    pub fn canonicalValue(aliases: *const Aliases, property: []const u8, value: []const u8) ?[]const u8 {
+        if (aliases.canonicalValueForProperty(property, value)) |canonical| return canonical;
+
         const canonical_property = aliases.canonicalProperty(property) orelse property;
-        const map = aliases.values.get(canonical_property) orelse return null;
-        return map.get(value);
+        if (!std.mem.eql(u8, canonical_property, property)) {
+            if (aliases.canonicalValueForProperty(canonical_property, value)) |canonical| return canonical;
+        }
+
+        var property_it = aliases.properties.iterator();
+        while (property_it.next()) |entry| {
+            if (!std.mem.eql(u8, entry.value_ptr.*, canonical_property)) continue;
+            if (std.mem.eql(u8, entry.key_ptr.*, property)) continue;
+            if (std.mem.eql(u8, entry.key_ptr.*, canonical_property)) continue;
+            if (aliases.canonicalValueForProperty(entry.key_ptr.*, value)) |canonical| return canonical;
+        }
+
+        return null;
     }
 
     pub fn loadPropertyLine(aliases: *Aliases, line: []const u8) !void {
@@ -105,6 +118,11 @@ pub const Aliases = struct {
         }
         return result.value_ptr;
     }
+
+    fn canonicalValueForProperty(aliases: *const Aliases, property: []const u8, value: []const u8) ?[]const u8 {
+        const map = aliases.values.get(property) orelse return null;
+        return map.get(value);
+    }
 };
 
 fn putOwned(
@@ -147,4 +165,26 @@ test "property aliases resolve short names" {
 
     try testing.expectEqualStrings("General_Category", aliases.canonicalProperty("gc").?);
     try testing.expectEqualStrings("Script", aliases.canonicalProperty("sc").?);
+}
+
+test "value aliases resolve after property aliases load later" {
+    var aliases = Aliases.init(testing.allocator);
+    defer aliases.deinit();
+
+    try aliases.loadPropertyValueLine("gc ; Lu ; Uppercase_Letter");
+    try aliases.loadPropertyLine("gc ; General_Category");
+
+    try testing.expectEqualStrings("Uppercase_Letter", aliases.canonicalValue("gc", "Lu").?);
+    try testing.expectEqualStrings("Uppercase_Letter", aliases.canonicalValue("General_Category", "Lu").?);
+}
+
+test "value aliases resolve when property aliases load first" {
+    var aliases = Aliases.init(testing.allocator);
+    defer aliases.deinit();
+
+    try aliases.loadPropertyLine("gc ; General_Category");
+    try aliases.loadPropertyValueLine("gc ; Lu ; Uppercase_Letter");
+
+    try testing.expectEqualStrings("Uppercase_Letter", aliases.canonicalValue("gc", "Lu").?);
+    try testing.expectEqualStrings("Uppercase_Letter", aliases.canonicalValue("General_Category", "Lu").?);
 }
