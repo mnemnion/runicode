@@ -38,6 +38,27 @@ pub fn build(b: *std.Build) void {
     // I'm just going to do this directly with custom executables, rather than
     // figure out how to follow the Approved Method within the Zig build system.
 
+    // Runicode UCD manifest audit
+    {
+        const runicode_gen_exe = b.addExecutable(.{
+            .name = "runicode-gen",
+            .root_module = b.createModule(.{
+                .target = b.graph.host,
+                .optimize = optimize,
+                .root_source_file = b.path("src/gen/runicode-gen.zig"),
+            }),
+        });
+
+        b.installArtifact(runicode_gen_exe);
+
+        const run_runicode_gen = b.addRunArtifact(runicode_gen_exe);
+        run_runicode_gen.addArg("UCD");
+
+        const run_runicode_gen_step = b.step("gen-runicode", "audit bundled Unicode data files");
+
+        run_runicode_gen_step.dependOn(&run_runicode_gen.step);
+    }
+
     // General Categories
     {
         const gen_cat_exe = b.addExecutable(.{
