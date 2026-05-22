@@ -81,10 +81,7 @@ pub const Db = struct {
             try prop_value.codepoints.append(db.allocator, codepoint);
 
             var buf: [4]u8 = undefined;
-            const len = std.unicode.utf8Encode(codepoint, &buf) catch |err| switch (err) {
-                error.Utf8CannotEncodeSurrogateHalf => continue,
-                error.CodepointTooLarge => return err,
-            };
+            const len = try wtf8Encode(codepoint, &buf);
             try prop_value.utf8.appendSlice(db.allocator, buf[0..len]);
         }
     }
@@ -103,6 +100,21 @@ pub const Db = struct {
     }
 };
 
+fn wtf8Encode(codepoint: u21, buf: []u8) !usize {
+    if (codepoint >= 0xD800 and codepoint <= 0xDFFF) {
+        if (buf.len < 3) return error.NoSpaceLeft;
+        buf[0] = 0xE0 | @as(u8, @intCast(codepoint >> 12));
+        buf[1] = 0x80 | @as(u8, @intCast((codepoint >> 6) & 0x3F));
+        buf[2] = 0x80 | @as(u8, @intCast(codepoint & 0x3F));
+        return 3;
+    }
+    const len = std.unicode.utf8Encode(codepoint, buf) catch |err| switch (err) {
+        error.Utf8CannotEncodeSurrogateHalf => unreachable,
+        error.CodepointTooLarge => return err,
+    };
+    return @intCast(len);
+}
+
 test "property group accumulates range as codepoints and utf8" {
     var db = Db.init(testing.allocator);
     defer db.deinit();
@@ -113,4 +125,16 @@ test "property group accumulates range as codepoints and utf8" {
     const value = prop.value("Lu").?;
     try testing.expectEqualSlices(u21, &.{ 0x41, 0x42, 0x43 }, value.codepoints.items);
     try testing.expectEqualStrings("ABC", value.utf8.items);
+}
+
+test "surrogate codepoints encode as WTF-8 bytes" {
+    var db = Db.init(testing.allocator);
+    defer db.deinit();
+
+    try db.addRange("GeneralCategory", "Cs", .{ .first = 0xD800, .last = 0xD800 });
+
+    const prop = db.property("GeneralCategory").?;
+    const value = prop.value("Cs").?;
+    try testing.expectEqualSlices(u21, &.{0xD800}, value.codepoints.items);
+    try testing.expectEqualSlices(u8, &.{ 0xED, 0xA0, 0x80 }, value.utf8.items);
 }
