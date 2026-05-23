@@ -29,8 +29,8 @@ the way `NamedMap` is currently forwarded from `ucd-tools`.
 
 Generated property namespaces should preserve the current naming style where it
 exists. New property families should follow the same pattern: a generated enum,
-codepoint arrays, UTF-8 strings, RuneSet values, and a loose-matching map when
-aliases are available.
+codepoint arrays, UTF-8 strings, RuneSet values, and a loose-matching map for
+runtime value retrieval, which includes aliases when they exist.
 
 ## Build Shape
 

@@ -527,7 +527,6 @@ test "normalizePropName rejects short buffers and non-printable ascii" {
     try std.testing.expectEqual(null, normalizePropName("General\xc2\xa0Category", &buf));
 }
 
-const std = @import("std");
 const assert = std.debug.assert;
 const TextList = std.ArrayListUnmanaged(u8);
 const CodepointList = std.ArrayListUnmanaged(u21);

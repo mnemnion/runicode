@@ -5,6 +5,9 @@ const db_data = @import("ucd/db.zig");
 const emit = @import("ucd/emit.zig");
 const manifest = @import("ucd/manifest.zig");
 const parse = @import("ucd/parse.zig");
+/// RuneSet is used only for derived aggregate properties, where unioning the
+/// final set is cheaper and less error-prone than replaying source ranges.
+const RuneSet = @import("runeset").RuneSet;
 const testing = std.testing;
 
 const Aliases = alias_data.Aliases;
@@ -46,6 +49,10 @@ pub fn main(init: std.process.Init) !void {
             else => {},
         }
     }
+
+    // Composite General_Category values depend on the leaf values already being
+    // loaded, and they should be normal DB values before emission starts.
+    try addGeneralCategoryAggregates(allocator, &db, &aliases);
     try emit.emitRoots(allocator, .{
         .io = io,
         .dir = out_dir,
@@ -136,6 +143,91 @@ fn copyGroupRanges(db: *Db, dest_name: []const u8, source: *const PropertyGroup)
         }
     }
 }
+
+/// Synthesizes Unicode General_Category aggregate aliases absent from the data.
+///
+/// The UCD file lists leaf categories (`Lu`, `Ll`, `Nd`, etc.). Property value
+/// aliases also define composite categories (`L`, `LC`, `N`, and friends), so we
+/// construct those composites here to match caller expectations without parsing
+/// comment-only `@missing` defaults.
+fn addGeneralCategoryAggregates(allocator: std.mem.Allocator, db: *Db, aliases: *Aliases) !void {
+    // Aggregates are only meaningful after the leaf GeneralCategory data exists.
+    const group = db.property("GeneralCategory") orelse return;
+    for (general_category_aggregates) |aggregate| {
+        // The table uses standard short aliases; storing the canonical value name
+        // keeps generated filenames and alias lookups consistent with UCD.
+        const target = aliases.canonicalValue("gc", aggregate.target) orelse aggregate.target;
+        if (group.value(target) != null) continue;
+
+        // Owns the accumulated union for this target. It starts empty so the
+        // first source can be adopted without doing a no-op union allocation.
+        var aggregate_set: ?RuneSet = null;
+        errdefer if (aggregate_set) |set| set.deinit(allocator);
+
+        for (aggregate.sources) |source_alias| {
+            // Source aliases are canonicalized for the same reason as the target:
+            // the database stores names after alias resolution, not raw shorts.
+            const source = aliases.canonicalValue("gc", source_alias) orelse source_alias;
+            const source_value = group.value(source) orelse return error.MissingGeneralCategoryAggregateSource;
+
+            // Source values already carry WTF-8 bytes, so RuneSet construction can
+            // avoid re-expanding ranges only to have RuneSet parse them again.
+            const source_set = try RuneSet.createFromConstString(source_value.utf8.items, allocator);
+            if (aggregate_set) |current_set| {
+                defer source_set.deinit(allocator);
+
+                // RuneSet's union implementation handles compaction; the DB only
+                // materializes the final set once after all sources are merged.
+                const union_set = try current_set.setUnion(source_set, allocator);
+                current_set.deinit(allocator);
+                aggregate_set = union_set;
+            } else {
+                aggregate_set = source_set;
+            }
+        }
+
+        // The loop can only continue without a set if a table row has no
+        // sources, which current Unicode aggregate definitions do not do.
+        const set = aggregate_set orelse continue;
+        try db.addRuneSet("GeneralCategory", target, set);
+        set.deinit(allocator);
+    }
+}
+
+/// Description of one synthetic General_Category composite.
+///
+/// Keeping this as data rather than code makes the Unicode alias relationship
+/// auditable: every target shows exactly which leaf categories it contains.
+const GeneralCategoryAggregate = struct {
+    /// Short or canonical alias for the composite category to synthesize.
+    ///
+    /// The value is canonicalized before insertion so generated names match the
+    /// property-value alias file.
+    target: []const u8,
+
+    /// Leaf category aliases whose RuneSets form the composite.
+    ///
+    /// Sources are resolved through aliases because the DB stores canonical
+    /// names even though the Unicode spec usually describes these sets by short
+    /// aliases.
+    sources: []const []const u8,
+};
+
+/// General_Category composites defined by Unicode property-value aliases.
+///
+/// These values are not separate rows in `extracted/DerivedGeneralCategory.txt`,
+/// but users reasonably expect them because `PropertyValueAliases.txt` names
+/// them and regex engines commonly expose them.
+const general_category_aggregates = [_]GeneralCategoryAggregate{
+    .{ .target = "C", .sources = &.{ "Cc", "Cf", "Cn", "Co", "Cs" } },
+    .{ .target = "L", .sources = &.{ "Ll", "Lm", "Lo", "Lt", "Lu" } },
+    .{ .target = "LC", .sources = &.{ "Ll", "Lt", "Lu" } },
+    .{ .target = "M", .sources = &.{ "Mc", "Me", "Mn" } },
+    .{ .target = "N", .sources = &.{ "Nd", "Nl", "No" } },
+    .{ .target = "P", .sources = &.{ "Pc", "Pd", "Pe", "Pf", "Pi", "Po", "Ps" } },
+    .{ .target = "S", .sources = &.{ "Sc", "Sk", "Sm", "So" } },
+    .{ .target = "Z", .sources = &.{ "Zl", "Zp", "Zs" } },
+};
 
 test "codepoint property reader ignores comment defaults" {
     var tmp = testing.tmpDir(.{});
@@ -261,6 +353,76 @@ test "codepoint property reader keeps grouped binary properties separate" {
     try testing.expectEqualSlices(u21, &.{0x09}, properties.value("White_Space").?.codepoints.items);
     try testing.expectEqualSlices(u21, &.{0x41}, properties.value("Alphabetic").?.codepoints.items);
     try testing.expect(properties.value("Y") == null);
+}
+
+test "general category aggregates synthesize alias targets" {
+    var aliases = Aliases.init(testing.allocator);
+    defer aliases.deinit();
+    try aliases.loadPropertyLine("gc ; General_Category");
+    inline for (.{
+        "gc ; C ; Other",
+        "gc ; L ; Letter",
+        "gc ; LC ; Cased_Letter",
+        "gc ; M ; Mark ; Combining_Mark",
+        "gc ; N ; Number",
+        "gc ; P ; Punctuation ; punct",
+        "gc ; S ; Symbol",
+        "gc ; Z ; Separator",
+        "gc ; Cc ; Control ; cntrl",
+        "gc ; Cf ; Format",
+        "gc ; Cn ; Unassigned",
+        "gc ; Co ; Private_Use",
+        "gc ; Cs ; Surrogate",
+        "gc ; Ll ; Lowercase_Letter",
+        "gc ; Lm ; Modifier_Letter",
+        "gc ; Lo ; Other_Letter",
+        "gc ; Lt ; Titlecase_Letter",
+        "gc ; Lu ; Uppercase_Letter",
+        "gc ; Mc ; Spacing_Mark",
+        "gc ; Me ; Enclosing_Mark",
+        "gc ; Mn ; Nonspacing_Mark",
+        "gc ; Nd ; Decimal_Number ; digit",
+        "gc ; Nl ; Letter_Number",
+        "gc ; No ; Other_Number",
+        "gc ; Pc ; Connector_Punctuation",
+        "gc ; Pd ; Dash_Punctuation",
+        "gc ; Pe ; Close_Punctuation",
+        "gc ; Pf ; Final_Punctuation",
+        "gc ; Pi ; Initial_Punctuation",
+        "gc ; Po ; Other_Punctuation",
+        "gc ; Ps ; Open_Punctuation",
+        "gc ; Sc ; Currency_Symbol",
+        "gc ; Sk ; Modifier_Symbol",
+        "gc ; Sm ; Math_Symbol",
+        "gc ; So ; Other_Symbol",
+        "gc ; Zl ; Line_Separator",
+        "gc ; Zp ; Paragraph_Separator",
+        "gc ; Zs ; Space_Separator",
+    }) |line| try aliases.loadPropertyValueLine(line);
+
+    var db = Db.init(testing.allocator);
+    defer db.deinit();
+
+    inline for (.{
+        "Cc", "Cf", "Cn", "Co", "Cs",
+        "Ll", "Lm", "Lo", "Lt", "Lu",
+        "Mc", "Me", "Mn", "Nd", "Nl",
+        "No", "Pc", "Pd", "Pe", "Pf",
+        "Pi", "Po", "Ps", "Sc", "Sk",
+        "Sm", "So", "Zl", "Zp", "Zs",
+    }, 0..) |short, idx| {
+        const value = aliases.canonicalValue("gc", short).?;
+        const codepoint: u21 = @intCast(0x100 + idx);
+        try db.addRange("GeneralCategory", value, .{ .first = codepoint, .last = codepoint });
+    }
+
+    try addGeneralCategoryAggregates(testing.allocator, &db, &aliases);
+
+    const group = db.property("GeneralCategory").?;
+    try testing.expectEqual(@as(usize, 5), group.value("Letter").?.codepoints.items.len);
+    try testing.expectEqual(@as(usize, 3), group.value("Cased_Letter").?.codepoints.items.len);
+    try testing.expectEqual(@as(usize, 7), group.value("Punctuation").?.codepoints.items.len);
+    try testing.expectEqual(@as(usize, 3), group.value("Separator").?.codepoints.items.len);
 }
 
 test "script extensions inherit scripts and add explicit script values" {
