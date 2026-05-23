@@ -28,7 +28,7 @@ pub fn build(b: *std.Build) void {
 
     const unicoder_dep = b.dependency("unicoder", .{
         .target = target,
-        .optimize = optimize,
+        .optimize = .ReleaseSafe,
     });
 
     tool_mod.addImport("unicoder", unicoder_dep.module("unicoder"));
@@ -42,7 +42,7 @@ pub fn build(b: *std.Build) void {
         .name = "runicode-gen",
         .root_module = b.createModule(.{
             .target = b.graph.host,
-            .optimize = optimize,
+            .optimize = .ReleaseFast,
             .root_source_file = b.path("src/gen/runicode-gen.zig"),
         }),
     });
