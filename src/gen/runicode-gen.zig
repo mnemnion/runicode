@@ -5,6 +5,7 @@ const db_data = @import("ucd/db.zig");
 const emit = @import("ucd/emit.zig");
 const manifest = @import("ucd/manifest.zig");
 const parse = @import("ucd/parse.zig");
+const unicoder = @import("unicoder");
 /// RuneSet is used only for derived aggregate properties, where unioning the
 /// final set is cheaper and less error-prone than replaying source ranges.
 const RuneSet = @import("runeset").RuneSet;
@@ -170,19 +171,15 @@ fn addGeneralCategoryAggregates(allocator: std.mem.Allocator, db: *Db, aliases: 
             const source = aliases.canonicalValue("gc", source_alias) orelse source_alias;
             const source_value = group.value(source) orelse return error.MissingGeneralCategoryAggregateSource;
 
-            // Source values already carry WTF-8 bytes, so RuneSet construction can
-            // avoid re-expanding ranges only to have RuneSet parse them again.
-            const source_set = try RuneSet.createFromConstString(source_value.utf8.items, allocator);
+            const source_set = source_value.rune_set orelse return error.MissingGeneralCategoryAggregateSource;
             if (aggregate_set) |current_set| {
-                defer source_set.deinit(allocator);
-
                 // RuneSet's union implementation handles compaction; the DB only
                 // materializes the final set once after all sources are merged.
                 const union_set = try current_set.setUnion(source_set, allocator);
                 current_set.deinit(allocator);
                 aggregate_set = union_set;
             } else {
-                aggregate_set = source_set;
+                aggregate_set = try cloneRuneSet(allocator, source_set);
             }
         }
 
@@ -229,6 +226,28 @@ const general_category_aggregates = [_]GeneralCategoryAggregate{
     .{ .target = "Z", .sources = &.{ "Zl", "Zp", "Zs" } },
 };
 
+fn cloneRuneSet(allocator: std.mem.Allocator, rune_set: RuneSet) !RuneSet {
+    return .{ .body = try allocator.dupe(u64, rune_set.body) };
+}
+
+fn expectRuneSetCodepoints(expected: []const u21, rune_set: RuneSet) !void {
+    var actual: std.ArrayList(u21) = .empty;
+    defer actual.deinit(testing.allocator);
+
+    var iter = rune_set.iterateRunes();
+    while (iter.next()) |rune| {
+        try actual.append(testing.allocator, codepointFromRune(rune));
+    }
+    try testing.expectEqualSlices(u21, expected, actual.items);
+}
+
+fn codepointFromRune(rune: []const u8) u21 {
+    var codepoints = unicoder.wtf8.iterator(rune, .assume_valid);
+    const codepoint = codepoints.nextCodepoint().?;
+    std.debug.assert(codepoints.nextCodepoint() == null);
+    return codepoint;
+}
+
 test "codepoint property reader ignores comment defaults" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -260,7 +279,7 @@ test "codepoint property reader ignores comment defaults" {
     const block = db.property("Blocks").?;
     try testing.expect(block.value("No_Block") == null);
     const basic_latin = block.value("Basic Latin").?;
-    try testing.expectEqualSlices(u21, &.{0x1}, basic_latin.codepoints.items);
+    try expectRuneSetCodepoints(&.{0x1}, basic_latin.rune_set.?);
 }
 
 test "codepoint property reader ignores comment-only files" {
@@ -322,7 +341,7 @@ test "codepoint property reader ignores malformed missing comments" {
     });
 
     const block = db.property("Blocks").?;
-    try testing.expectEqualSlices(u21, &.{0x1}, block.value("Basic Latin").?.codepoints.items);
+    try expectRuneSetCodepoints(&.{0x1}, block.value("Basic Latin").?.rune_set.?);
 }
 
 test "codepoint property reader keeps grouped binary properties separate" {
@@ -350,8 +369,8 @@ test "codepoint property reader keeps grouped binary properties separate" {
     });
 
     const properties = db.property("Properties").?;
-    try testing.expectEqualSlices(u21, &.{0x09}, properties.value("White_Space").?.codepoints.items);
-    try testing.expectEqualSlices(u21, &.{0x41}, properties.value("Alphabetic").?.codepoints.items);
+    try expectRuneSetCodepoints(&.{0x09}, properties.value("White_Space").?.rune_set.?);
+    try expectRuneSetCodepoints(&.{0x41}, properties.value("Alphabetic").?.rune_set.?);
     try testing.expect(properties.value("Y") == null);
 }
 
@@ -419,10 +438,10 @@ test "general category aggregates synthesize alias targets" {
     try addGeneralCategoryAggregates(testing.allocator, &db, &aliases);
 
     const group = db.property("GeneralCategory").?;
-    try testing.expectEqual(@as(usize, 5), group.value("Letter").?.codepoints.items.len);
-    try testing.expectEqual(@as(usize, 3), group.value("Cased_Letter").?.codepoints.items.len);
-    try testing.expectEqual(@as(usize, 7), group.value("Punctuation").?.codepoints.items.len);
-    try testing.expectEqual(@as(usize, 3), group.value("Separator").?.codepoints.items.len);
+    try testing.expectEqual(@as(usize, 5), group.value("Letter").?.rune_set.?.runeCount());
+    try testing.expectEqual(@as(usize, 3), group.value("Cased_Letter").?.rune_set.?.runeCount());
+    try testing.expectEqual(@as(usize, 7), group.value("Punctuation").?.rune_set.?.runeCount());
+    try testing.expectEqual(@as(usize, 3), group.value("Separator").?.rune_set.?.runeCount());
 }
 
 test "script extensions inherit scripts and add explicit script values" {
@@ -471,7 +490,7 @@ test "script extensions inherit scripts and add explicit script values" {
     });
 
     const scripts_extended = db.property("ScriptsExtended").?;
-    try testing.expectEqualSlices(u21, &.{ 0x0, 0x1, 0x2, 0x2 }, scripts_extended.value("Latin").?.codepoints.items);
-    try testing.expectEqualSlices(u21, &.{ 0x3, 0x1 }, scripts_extended.value("Greek").?.codepoints.items);
-    try testing.expectEqualSlices(u21, &.{0x2}, scripts_extended.value("Cyrillic").?.codepoints.items);
+    try expectRuneSetCodepoints(&.{ 0x0, 0x1, 0x2 }, scripts_extended.value("Latin").?.rune_set.?);
+    try expectRuneSetCodepoints(&.{ 0x1, 0x3 }, scripts_extended.value("Greek").?.rune_set.?);
+    try expectRuneSetCodepoints(&.{0x2}, scripts_extended.value("Cyrillic").?.rune_set.?);
 }

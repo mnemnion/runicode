@@ -1,35 +1,25 @@
-/// Standard library pieces used for allocation, maps, and UTF-8 encoding.
+/// Standard library pieces used for allocation and maps.
 const std = @import("std");
 /// Test namespace is kept local so DB invariants can live next to the storage code.
 const testing = std.testing;
+/// WTF-8 encode/decode belongs to unicoder, not this generator.
+const unicoder = @import("unicoder");
 /// Shared parsed range type used by the file readers and the emitter.
 const parse = @import("parse.zig");
-/// Runtime set type used when a caller already has a canonical Unicode set.
+/// Runtime set type retained by the DB for generated set/string/codepoint leaves.
 const RuneSet = @import("runeset").RuneSet;
 
-/// One concrete property value, stored in all shapes the generator emits.
+/// One concrete property value.
 ///
-/// Keeping ranges, scalar codepoints, and concatenated WTF-8 bytes together is
-/// memory-heavy, but it prevents every emitter from re-deriving its preferred
-/// representation from scratch.
+/// Ranges preserve the UCD source shape for copying and diagnostics. `rune_set`
+/// is the normalized data used by emitters.
 pub const PropertyValue = struct {
     /// Compact inclusive ranges as read from UCD, or reconstructed from a RuneSet.
-    ///
-    /// The set/codepoint/string emitters all use this shape as the stable source
-    /// of truth for generated files.
     ranges: std.ArrayList(parse.Range) = .empty,
 
-    /// Expanded scalar values for direct `[]const u21` output.
-    ///
-    /// This duplicates the ranges on purpose because generated codepoints files
-    /// should not have to expand ranges at comptime.
-    codepoints: std.ArrayList(u21) = .empty,
-
-    /// Concatenated WTF-8 codepoint bytes for string and RuneSet construction.
-    ///
-    /// WTF-8 is used so surrogate property data remains representable even
-    /// though it is not valid Unicode scalar UTF-8.
-    utf8: std.ArrayList(u8) = .empty,
+    /// Normalized set for this property value. It is optional only because map
+    /// slots are default-initialized before the first range is inserted.
+    rune_set: ?RuneSet = null,
 
     /// Releases all owned buffers for a property value.
     ///
@@ -37,8 +27,20 @@ pub const PropertyValue = struct {
     /// and use the same allocator that populated the lists.
     pub fn deinit(value: *PropertyValue, allocator: std.mem.Allocator) void {
         value.ranges.deinit(allocator);
-        value.codepoints.deinit(allocator);
-        value.utf8.deinit(allocator);
+        if (value.rune_set) |set| set.deinit(allocator);
+    }
+
+    /// Takes ownership of `owned_set` and unions it into this value's RuneSet.
+    fn addOwnedRuneSet(value: *PropertyValue, allocator: std.mem.Allocator, owned_set: RuneSet) !void {
+        if (value.rune_set) |current_set| {
+            errdefer owned_set.deinit(allocator);
+            const union_set = try current_set.setUnion(owned_set, allocator);
+            current_set.deinit(allocator);
+            owned_set.deinit(allocator);
+            value.rune_set = union_set;
+        } else {
+            value.rune_set = owned_set;
+        }
     }
 };
 
@@ -102,8 +104,8 @@ pub const PropertyGroup = struct {
 
 /// In-memory database of all property groups the generator will emit.
 ///
-/// This is intentionally simple: the expensive normalization happens while data
-/// is loaded so emission can walk plain maps and arrays.
+/// This is intentionally simple: the expensive RuneSet normalization happens
+/// while data is loaded so emission can walk plain maps.
 pub const Db = struct {
     /// Allocator used for group names, groups, and all nested property values.
     allocator: std.mem.Allocator,
@@ -147,61 +149,35 @@ pub const Db = struct {
         return db.groups.count();
     }
 
-    /// Adds one inclusive range to a property value and expands its emitted forms.
-    ///
-    /// UCD files are range-oriented, while generated APIs expose ranges,
-    /// codepoint arrays, and strings, so ingest pays the expansion cost once.
+    /// Adds one inclusive range to a property value and merges it into the
+    /// value's retained RuneSet.
     pub fn addRange(db: *Db, property_name: []const u8, value_name: []const u8, range: parse.Range) !void {
         const group = try db.getOrPutProperty(property_name);
         const prop_value = try group.getOrPutValue(value_name);
+
+        const range_set = try createRuneSetFromRanges(&.{range}, db.allocator);
+        const old_ranges_len = prop_value.ranges.items.len;
         try prop_value.ranges.append(db.allocator, range);
-
-        var codepoint = range.first;
-        while (codepoint <= range.last) : (codepoint += 1) {
-            try prop_value.codepoints.append(db.allocator, codepoint);
-
-            var buf: [4]u8 = undefined;
-            const len = try wtf8Encode(codepoint, &buf);
-            try prop_value.utf8.appendSlice(db.allocator, buf[0..len]);
-        }
+        errdefer prop_value.ranges.shrinkRetainingCapacity(old_ranges_len);
+        try prop_value.addOwnedRuneSet(db.allocator, range_set);
     }
 
-    /// Adds a complete RuneSet to a property value in one ordered pass.
+    /// Adds a complete RuneSet to a property value.
     ///
     /// Aggregate properties are cheaper to build as RuneSet unions than by
-    /// replaying many source ranges; this method turns the final set back into
-    /// the DB's normal ranges/codepoints/WTF-8 representation.
+    /// replaying many source ranges. This stores both the compact ranges rebuilt
+    /// from the set and a cloned RuneSet owned by the database.
     pub fn addRuneSet(db: *Db, property_name: []const u8, value_name: []const u8, rune_set: RuneSet) !void {
-        // The property group provides the namespace that emitted files mirror.
         const group = try db.getOrPutProperty(property_name);
-
-        // The property value is where all three generated representations are
-        // accumulated together so they cannot drift apart.
         const prop_value = try group.getOrPutValue(value_name);
 
-        // RuneSet iteration is sorted, so adjacent decoded codepoints can be
-        // folded into compact ranges while we append the expanded forms.
-        var pending_range: ?parse.Range = null;
-        var iter = rune_set.iterateRunes();
-        while (iter.next()) |rune| {
-            // Decode the iterator's WTF-8 slice once so range compaction and
-            // codepoint output use the same scalar value.
-            const codepoint = try wtf8Decode(rune);
-            try prop_value.codepoints.append(db.allocator, codepoint);
-            try prop_value.utf8.appendSlice(db.allocator, rune);
+        var compact_ranges = try rangesFromRuneSet(db.allocator, rune_set);
+        defer compact_ranges.deinit(db.allocator);
+        const old_ranges_len = prop_value.ranges.items.len;
+        try prop_value.ranges.appendSlice(db.allocator, compact_ranges.items);
+        errdefer prop_value.ranges.shrinkRetainingCapacity(old_ranges_len);
 
-            if (pending_range) |*range| {
-                if (range.last != std.math.maxInt(u21) and range.last + 1 == codepoint) {
-                    range.last = codepoint;
-                } else {
-                    try prop_value.ranges.append(db.allocator, range.*);
-                    pending_range = .{ .first = codepoint, .last = codepoint };
-                }
-            } else {
-                pending_range = .{ .first = codepoint, .last = codepoint };
-            }
-        }
-        if (pending_range) |range| try prop_value.ranges.append(db.allocator, range);
+        try prop_value.addOwnedRuneSet(db.allocator, try cloneRuneSet(db.allocator, rune_set));
     }
 
     /// Finds or creates a property group and takes ownership of the group name.
@@ -222,65 +198,75 @@ pub const Db = struct {
     }
 };
 
-/// Encodes a codepoint as WTF-8 bytes.
-///
-/// Unicode property data includes surrogate codepoints, so strict UTF-8 is not
-/// enough for the generator's internal string representation.
-fn wtf8Encode(codepoint: u21, buf: []u8) !usize {
-    if (codepoint >= 0xD800 and codepoint <= 0xDFFF) {
-        if (buf.len < 3) return error.NoSpaceLeft;
-        buf[0] = 0xE0 | @as(u8, @intCast(codepoint >> 12));
-        buf[1] = 0x80 | @as(u8, @intCast((codepoint >> 6) & 0x3F));
-        buf[2] = 0x80 | @as(u8, @intCast(codepoint & 0x3F));
-        return 3;
-    }
-    const len = std.unicode.utf8Encode(codepoint, buf) catch |err| switch (err) {
-        error.Utf8CannotEncodeSurrogateHalf => unreachable,
-        error.CodepointTooLarge => return err,
-    };
-    return @intCast(len);
+/// Clones a RuneSet body so the database owns its stored set.
+fn cloneRuneSet(allocator: std.mem.Allocator, rune_set: RuneSet) !RuneSet {
+    return .{ .body = try allocator.dupe(u64, rune_set.body) };
 }
 
-/// Decodes one WTF-8 rune yielded by `RuneSet.iterateRunes`.
-///
-/// This mirrors `wtf8Encode` so RuneSet-backed aggregates can be converted back
-/// into scalar codepoints, including surrogate codepoints.
-fn wtf8Decode(bytes: []const u8) !u21 {
-    if (bytes.len == 0) return error.InvalidWtf8;
+/// Expands ranges to WTF-8 and constructs a RuneSet from the mutable scratch
+/// buffer.
+fn createRuneSetFromRanges(ranges: []const parse.Range, allocator: std.mem.Allocator) !RuneSet {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
 
-    // The leading byte determines the sequence width; continuation bytes are
-    // validated before their payload bits are folded into the codepoint.
-    const first = bytes[0];
-    if (first <= 0x7F) return first;
-    if (first >= 0xC0 and first <= 0xDF) {
-        if (bytes.len < 2 or !isFollowByte(bytes[1])) return error.InvalidWtf8;
-        return (@as(u21, first & 0x1F) << 6) | @as(u21, bytes[1] & 0x3F);
+    for (ranges) |range| {
+        var codepoint = range.first;
+        while (codepoint <= range.last) : (codepoint += 1) {
+            var buf: [4]u8 = undefined;
+            const len = try unicoder.codepoint.toWtf8(codepoint, &buf);
+            try bytes.appendSlice(allocator, buf[0..len]);
+        }
     }
-    if (first >= 0xE0 and first <= 0xEF) {
-        if (bytes.len < 3 or !isFollowByte(bytes[1]) or !isFollowByte(bytes[2])) return error.InvalidWtf8;
-        return (@as(u21, first & 0x0F) << 12) |
-            (@as(u21, bytes[1] & 0x3F) << 6) |
-            @as(u21, bytes[2] & 0x3F);
-    }
-    if (first >= 0xF0 and first <= 0xF7) {
-        if (bytes.len < 4 or !isFollowByte(bytes[1]) or !isFollowByte(bytes[2]) or !isFollowByte(bytes[3])) return error.InvalidWtf8;
-        return (@as(u21, first & 0x07) << 18) |
-            (@as(u21, bytes[1] & 0x3F) << 12) |
-            (@as(u21, bytes[2] & 0x3F) << 6) |
-            @as(u21, bytes[3] & 0x3F);
-    }
-    return error.InvalidWtf8;
+
+    const mutable = try bytes.toOwnedSlice(allocator);
+    defer allocator.free(mutable);
+    return try RuneSet.createFromMutableString(mutable, allocator);
 }
 
-/// Returns whether a byte is a WTF-8/UTF-8 continuation byte.
-///
-/// The decoder checks this explicitly so malformed internal byte slices fail
-/// locally instead of being mis-decoded into bad codepoints.
-fn isFollowByte(byte: u8) bool {
-    return byte >= 0x80 and byte <= 0xBF;
+/// Rebuilds compact ranges from RuneSet's sorted iteration order.
+fn rangesFromRuneSet(allocator: std.mem.Allocator, rune_set: RuneSet) !std.ArrayList(parse.Range) {
+    var ranges: std.ArrayList(parse.Range) = .empty;
+    errdefer ranges.deinit(allocator);
+
+    var pending_range: ?parse.Range = null;
+    var iter = rune_set.iterateRunes();
+    while (iter.next()) |rune| {
+        const codepoint = codepointFromRune(rune);
+        if (pending_range) |*range| {
+            if (range.last != std.math.maxInt(u21) and range.last + 1 == codepoint) {
+                range.last = codepoint;
+            } else {
+                try ranges.append(allocator, range.*);
+                pending_range = .{ .first = codepoint, .last = codepoint };
+            }
+        } else {
+            pending_range = .{ .first = codepoint, .last = codepoint };
+        }
+    }
+    if (pending_range) |range| try ranges.append(allocator, range);
+    return ranges;
 }
 
-test "property group accumulates range as codepoints and utf8" {
+/// Decodes the single WTF-8 rune slice yielded by RuneSet iteration.
+fn codepointFromRune(rune: []const u8) u21 {
+    var codepoints = unicoder.wtf8.iterator(rune, .assume_valid);
+    const codepoint = codepoints.nextCodepoint().?;
+    std.debug.assert(codepoints.nextCodepoint() == null);
+    return codepoint;
+}
+
+fn expectRuneSetCodepoints(expected: []const u21, rune_set: RuneSet) !void {
+    var actual: std.ArrayList(u21) = .empty;
+    defer actual.deinit(testing.allocator);
+
+    var iter = rune_set.iterateRunes();
+    while (iter.next()) |rune| {
+        try actual.append(testing.allocator, codepointFromRune(rune));
+    }
+    try testing.expectEqualSlices(u21, expected, actual.items);
+}
+
+test "property group accumulates range as ranges and runeset" {
     var db = Db.init(testing.allocator);
     defer db.deinit();
 
@@ -288,11 +274,11 @@ test "property group accumulates range as codepoints and utf8" {
 
     const prop = db.property("GeneralCategory").?;
     const value = prop.value("Lu").?;
-    try testing.expectEqualSlices(u21, &.{ 0x41, 0x42, 0x43 }, value.codepoints.items);
-    try testing.expectEqualStrings("ABC", value.utf8.items);
+    try testing.expectEqualSlices(parse.Range, &.{.{ .first = 0x41, .last = 0x43 }}, value.ranges.items);
+    try expectRuneSetCodepoints(&.{ 0x41, 0x42, 0x43 }, value.rune_set.?);
 }
 
-test "surrogate codepoints encode as WTF-8 bytes" {
+test "surrogate codepoints are retained in the runeset" {
     var db = Db.init(testing.allocator);
     defer db.deinit();
 
@@ -300,11 +286,10 @@ test "surrogate codepoints encode as WTF-8 bytes" {
 
     const prop = db.property("GeneralCategory").?;
     const value = prop.value("Cs").?;
-    try testing.expectEqualSlices(u21, &.{0xD800}, value.codepoints.items);
-    try testing.expectEqualSlices(u8, &.{ 0xED, 0xA0, 0x80 }, value.utf8.items);
+    try expectRuneSetCodepoints(&.{0xD800}, value.rune_set.?);
 }
 
-test "property group accumulates runeset as compact ranges and utf8" {
+test "property group accumulates runeset as compact ranges and stored runeset" {
     var db = Db.init(testing.allocator);
     defer db.deinit();
 
@@ -319,6 +304,5 @@ test "property group accumulates runeset as compact ranges and utf8" {
         .{ .first = 0x41, .last = 0x43 },
         .{ .first = 0x58, .last = 0x58 },
     }, value.ranges.items);
-    try testing.expectEqualSlices(u21, &.{ 0x41, 0x42, 0x43, 0x58 }, value.codepoints.items);
-    try testing.expectEqualStrings("ABCX", value.utf8.items);
+    try expectRuneSetCodepoints(&.{ 0x41, 0x42, 0x43, 0x58 }, value.rune_set.?);
 }

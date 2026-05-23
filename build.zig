@@ -48,7 +48,9 @@ pub fn build(b: *std.Build) void {
     });
 
     b.installArtifact(runicode_gen_exe);
+    runicode_gen_exe.root_module.addImport("ezcaper", ezcaper_dep.module("ezcaper"));
     runicode_gen_exe.root_module.addImport("runeset", runeset_dep.module("runeset"));
+    runicode_gen_exe.root_module.addImport("unicoder", unicoder_dep.module("unicoder"));
 
     const run_gen = b.addRunArtifact(runicode_gen_exe);
     run_gen.addDirectoryArg(b.path("UCD"));
@@ -93,6 +95,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
     gen_unit_tests.root_module.addImport("runeset", runeset_dep.module("runeset"));
+    gen_unit_tests.root_module.addImport("ezcaper", ezcaper_dep.module("ezcaper"));
+    gen_unit_tests.root_module.addImport("unicoder", unicoder_dep.module("unicoder"));
 
     const run_gen_unit_tests = b.addRunArtifact(gen_unit_tests);
 

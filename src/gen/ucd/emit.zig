@@ -1,22 +1,40 @@
 const std = @import("std");
+const escString = @import("ezcaper").escStringExactQuoted;
 const testing = std.testing;
+const unicoder = @import("unicoder");
 
 const Aliases = @import("aliases.zig").Aliases;
 const Db = @import("db.zig").Db;
-const Range = @import("parse.zig").Range;
 const RuneSet = @import("runeset").RuneSet;
 
+/// Filesystem handles and root filenames used by the emitter.
 pub const OutputDir = struct {
+    /// Caller-owned I/O context threaded through every std.Io operation.
     io: std.Io,
+
+    /// Already-open output directory; emission should not decide where it lives.
     dir: std.Io.Dir,
+
+    /// Top-level module imported by package users.
     runicode_path: []const u8 = "runicode.zig",
+
+    /// Root file which imports every generated RuneSet group.
     sets_path: []const u8 = "sets.zig",
+
+    /// Root file which imports every generated codepoint group.
     codepoints_path: []const u8 = "codepoints.zig",
+
+    /// Root file which imports every generated WTF-8 string group.
     strs_path: []const u8 = "strs.zig",
+
+    /// Root file containing property-value enum types.
     enums_path: []const u8 = "enums.zig",
+
+    /// Root file which imports property lookup maps.
     maps_path: []const u8 = "maps.zig",
 };
 
+/// Writes all generated source files from the loaded UCD database.
 pub fn emitRoots(allocator: std.mem.Allocator, dir: OutputDir, db: *Db, aliases: *const Aliases) !void {
     const group_names = try sortedGroupNames(allocator, db);
     defer allocator.free(group_names);
@@ -27,6 +45,7 @@ pub fn emitRoots(allocator: std.mem.Allocator, dir: OutputDir, db: *Db, aliases:
     try writeRootFile(dir, dir.runicode_path, writeRunicodeRoot, .{});
 }
 
+/// Writes the three generated data trees: sets, codepoints, and strings.
 fn writeDataFiles(
     allocator: std.mem.Allocator,
     dir: OutputDir,
@@ -39,6 +58,7 @@ fn writeDataFiles(
     try writeStrsFiles(allocator, dir, group_names, db, aliases);
 }
 
+/// Opens a root file, calls its writer callback, and flushes the buffered writer.
 fn writeRootFile(
     dir: OutputDir,
     path: []const u8,
@@ -54,6 +74,8 @@ fn writeRootFile(
     try file_writer.interface.flush();
 }
 
+/// Writes strs.zig, one strs/<group>.zig file per property group, and one
+/// strs/<group>/<value>.zig file per property value.
 fn writeStrsFiles(
     allocator: std.mem.Allocator,
     dir: OutputDir,
@@ -98,7 +120,7 @@ fn writeStrsFiles(
             defer allocator.free(value_path);
             const import_path = try relativeGroupImportPath(allocator, group_path, value_path);
             defer allocator.free(import_path);
-            try writeStrsValueFile(allocator, dir, value_path, decl_name, value.ranges.items);
+            try writeStrsValueFile(allocator, dir, value_path, decl_name, value.rune_set.?);
             try group_out.print("pub const {f} = @import(\"{s}\").{f};\n", .{ identifier(decl_name), import_path, identifier(decl_name) });
         }
         try writeGroupValueAliases(allocator, group_out, group_name, value_names, aliases);
@@ -107,23 +129,26 @@ fn writeStrsFiles(
     try writer.flush();
 }
 
-fn writeStrsValueFile(allocator: std.mem.Allocator, dir: OutputDir, path: []const u8, decl_name: []const u8, ranges: []const Range) !void {
+/// Writes one string leaf file. RuneSet collapses duplicate or overlapping
+/// ranges before ezcaper quotes the resulting WTF-8 bytes.
+fn writeStrsValueFile(allocator: std.mem.Allocator, dir: OutputDir, path: []const u8, decl_name: []const u8, rune_set: RuneSet) !void {
     var file = try dir.dir.createFile(dir.io, path, .{ .lock = .exclusive });
     defer file.close(dir.io);
     var buf: [4096]u8 = undefined;
     var file_writer = file.writer(dir.io, &buf);
     const writer = &file_writer.interface;
 
-    const rune_set = try createRuneSetFromRanges(ranges, allocator);
-    defer rune_set.deinit(allocator);
+    const normalized = try stringFromRuneSet(allocator, rune_set);
+    defer allocator.free(normalized);
 
     try writer.writeAll(header_txt);
-    try writer.print("pub const {f} = ", .{identifier(decl_name)});
-    try writeStringLiteral(writer, rune_set);
-    try writer.writeAll(";\n");
+    try writer.print("pub const {f} = {f};\n", .{ identifier(decl_name), escString(normalized) });
     try writer.flush();
 }
 
+/// Writes codepoints.zig, group imports, and one `[N]u21` leaf per value.
+/// This is mostly the same loop as `writeStrsFiles` and should probably share
+/// structure once the generated layout settles.
 fn writeCodepointsFiles(
     allocator: std.mem.Allocator,
     dir: OutputDir,
@@ -168,7 +193,7 @@ fn writeCodepointsFiles(
             defer allocator.free(value_path);
             const import_path = try relativeGroupImportPath(allocator, group_path, value_path);
             defer allocator.free(import_path);
-            try writeCodepointsValueFile(allocator, dir, value_path, decl_name, value.ranges.items);
+            try writeCodepointsValueFile(dir, value_path, decl_name, value.rune_set.?);
             try group_out.print("pub const {f} = @import(\"{s}\").{f};\n", .{ identifier(decl_name), import_path, identifier(decl_name) });
         }
         try writeGroupValueAliases(allocator, group_out, group_name, value_names, aliases);
@@ -177,15 +202,14 @@ fn writeCodepointsFiles(
     try writer.flush();
 }
 
-fn writeCodepointsValueFile(allocator: std.mem.Allocator, dir: OutputDir, path: []const u8, decl_name: []const u8, ranges: []const Range) !void {
+/// Writes one codepoint leaf. RuneSet iteration gives the final sorted,
+/// deduplicated order.
+fn writeCodepointsValueFile(dir: OutputDir, path: []const u8, decl_name: []const u8, rune_set: RuneSet) !void {
     var file = try dir.dir.createFile(dir.io, path, .{ .lock = .exclusive });
     defer file.close(dir.io);
     var buf: [4096]u8 = undefined;
     var file_writer = file.writer(dir.io, &buf);
     const writer = &file_writer.interface;
-
-    const rune_set = try createRuneSetFromRanges(ranges, allocator);
-    defer rune_set.deinit(allocator);
 
     try writer.writeAll(header_txt);
     try writer.print("pub const {f}: [{d}]u21 = .{{ ", .{ identifier(decl_name), rune_set.runeCount() });
@@ -194,6 +218,7 @@ fn writeCodepointsValueFile(allocator: std.mem.Allocator, dir: OutputDir, path: 
     try writer.flush();
 }
 
+/// Writes sets.zig, group imports, and one serialized RuneSet leaf per value.
 fn writeSetsFiles(
     allocator: std.mem.Allocator,
     dir: OutputDir,
@@ -238,7 +263,7 @@ fn writeSetsFiles(
             defer allocator.free(value_path);
             const import_path = try relativeGroupImportPath(allocator, group_path, value_path);
             defer allocator.free(import_path);
-            try writeSetsValueFile(allocator, dir, value_path, decl_name, value.ranges.items);
+            try writeSetsValueFile(dir, value_path, decl_name, value.rune_set.?);
             try group_out.print("pub const {f} = @import(\"{s}\").{f};\n", .{ identifier(decl_name), import_path, identifier(decl_name) });
         }
         try writeGroupValueAliases(allocator, group_out, group_name, value_names, aliases);
@@ -247,15 +272,13 @@ fn writeSetsFiles(
     try writer.flush();
 }
 
-fn writeSetsValueFile(allocator: std.mem.Allocator, dir: OutputDir, path: []const u8, decl_name: []const u8, ranges: []const Range) !void {
+/// Writes one RuneSet leaf using runeset's serializer.
+fn writeSetsValueFile(dir: OutputDir, path: []const u8, decl_name: []const u8, rune_set: RuneSet) !void {
     var file = try dir.dir.createFile(dir.io, path, .{ .lock = .exclusive });
     defer file.close(dir.io);
     var buf: [4096]u8 = undefined;
     var file_writer = file.writer(dir.io, &buf);
     const writer = &file_writer.interface;
-
-    const rune_set = try createRuneSetFromRanges(ranges, allocator);
-    defer rune_set.deinit(allocator);
 
     try writer.writeAll(header_txt);
     try writer.writeAll("const RuneSet = @import(\"runeset\").RuneSet;\n\n");
@@ -264,6 +287,8 @@ fn writeSetsValueFile(allocator: std.mem.Allocator, dir: OutputDir, path: []cons
     try writer.flush();
 }
 
+/// Adds `pub const Alias = Canonical;` declarations to a group root. `seen_decls`
+/// prevents duplicate aliases after UCD names are converted to Zig names.
 fn writeGroupValueAliases(
     allocator: std.mem.Allocator,
     writer: *std.Io.Writer,
@@ -310,6 +335,7 @@ fn writeGroupValueAliases(
     }
 }
 
+/// Writes one enum per property group into enums.zig.
 fn writeEnumsRoot(writer: *std.Io.Writer, group_names: []const []const u8, db: *Db) !void {
     try writer.writeAll(header_txt);
     for (group_names) |group_name| {
@@ -327,6 +353,7 @@ fn writeEnumsRoot(writer: *std.Io.Writer, group_names: []const []const u8, db: *
     }
 }
 
+/// Writes runicode.zig, the public import root for generated data.
 fn writeRunicodeRoot(writer: *std.Io.Writer) !void {
     try writer.writeAll(header_txt);
     try writer.writeAll(
@@ -351,6 +378,7 @@ fn writeRunicodeRoot(writer: *std.Io.Writer) !void {
     );
 }
 
+/// Writes maps.zig and one maps/<group>.zig file for mapped groups.
 fn writeMapsFiles(
     allocator: std.mem.Allocator,
     dir: OutputDir,
@@ -381,6 +409,8 @@ fn writeMapsFiles(
     try writer.flush();
 }
 
+/// Writes one maps/<group>.zig file. Each map module imports that group's sets,
+/// codepoints, strings, and enum so `NamedMap` can expose loose lookup tables.
 fn writeMapGroupFile(allocator: std.mem.Allocator, dir: OutputDir, path: []const u8, group_name: []const u8) !void {
     var file = try dir.dir.createFile(dir.io, path, .{ .lock = .exclusive });
     defer file.close(dir.io);
@@ -426,6 +456,7 @@ fn writeMapGroupFile(allocator: std.mem.Allocator, dir: OutputDir, path: []const
     try writer.flush();
 }
 
+/// Returns an import path from `from_path` to `target_path`.
 fn relativeImportPath(allocator: std.mem.Allocator, from_path: []const u8, target_path: []const u8) ![]const u8 {
     const from_dir = std.fs.path.dirname(from_path) orelse "";
     var result: std.ArrayList(u8) = .empty;
@@ -437,112 +468,35 @@ fn relativeImportPath(allocator: std.mem.Allocator, from_path: []const u8, targe
     return try result.toOwnedSlice(allocator);
 }
 
+/// Frees copied keys stored in temporary string maps.
 fn freeSeenMatches(allocator: std.mem.Allocator, seen_matches: *std.StringHashMapUnmanaged(void)) void {
     var it = seen_matches.keyIterator();
     while (it.next()) |key| allocator.free(key.*);
     seen_matches.deinit(allocator);
 }
 
-fn createRuneSetFromRanges(ranges: []const Range, allocator: std.mem.Allocator) !RuneSet {
-    var bytes: std.ArrayList(u8) = .empty;
-    defer bytes.deinit(allocator);
-
-    for (ranges) |range| {
-        var codepoint = range.first;
-        while (codepoint <= range.last) : (codepoint += 1) {
-            var buf: [4]u8 = undefined;
-            const len = try wtf8Encode(codepoint, &buf);
-            try bytes.appendSlice(allocator, buf[0..len]);
-        }
-    }
-
-    return try RuneSet.createFromConstString(bytes.items, allocator);
-}
-
+/// Writes each RuneSet item as a `0x...` u21 literal.
 fn writeCodepoints(writer: *std.Io.Writer, rune_set: RuneSet) !void {
     var iter = rune_set.iterateRunes();
     while (iter.next()) |rune| {
-        const codepoint = (try wtf8Decode(rune)).codepoint;
+        const codepoint = unicoder.wtf8.valid.decode(rune);
         try writer.print("0x{X}, ", .{codepoint});
     }
 }
 
-fn writeStringLiteral(writer: *std.Io.Writer, rune_set: RuneSet) !void {
-    try writer.writeByte('"');
+/// Copies RuneSet's sorted WTF-8 slices into one string buffer.
+fn stringFromRuneSet(allocator: std.mem.Allocator, rune_set: RuneSet) ![]u8 {
+    var str: std.ArrayList(u8) = .empty;
+    errdefer str.deinit(allocator);
+
     var iter = rune_set.iterateRunes();
     while (iter.next()) |rune| {
-        const codepoint = (try wtf8Decode(rune)).codepoint;
-        try writeStringLiteralCodepoint(writer, codepoint);
+        try str.appendSlice(allocator, rune);
     }
-    try writer.writeByte('"');
+    return try str.toOwnedSlice(allocator);
 }
 
-const DecodedWtf8 = struct {
-    codepoint: u21,
-    len: usize,
-};
-
-fn wtf8Decode(bytes: []const u8) !DecodedWtf8 {
-    if (bytes.len == 0) return error.InvalidWtf8;
-    const first = bytes[0];
-    if (first <= 0x7F) return .{ .codepoint = first, .len = 1 };
-    if (first >= 0xC0 and first <= 0xDF) {
-        if (bytes.len < 2 or !isFollowByte(bytes[1])) return error.InvalidWtf8;
-        return .{
-            .codepoint = (@as(u21, first & 0x1F) << 6) | @as(u21, bytes[1] & 0x3F),
-            .len = 2,
-        };
-    }
-    if (first >= 0xE0 and first <= 0xEF) {
-        if (bytes.len < 3 or !isFollowByte(bytes[1]) or !isFollowByte(bytes[2])) return error.InvalidWtf8;
-        return .{
-            .codepoint = (@as(u21, first & 0x0F) << 12) |
-                (@as(u21, bytes[1] & 0x3F) << 6) |
-                @as(u21, bytes[2] & 0x3F),
-            .len = 3,
-        };
-    }
-    if (first >= 0xF0 and first <= 0xF7) {
-        if (bytes.len < 4 or !isFollowByte(bytes[1]) or !isFollowByte(bytes[2]) or !isFollowByte(bytes[3])) return error.InvalidWtf8;
-        return .{
-            .codepoint = (@as(u21, first & 0x07) << 18) |
-                (@as(u21, bytes[1] & 0x3F) << 12) |
-                (@as(u21, bytes[2] & 0x3F) << 6) |
-                @as(u21, bytes[3] & 0x3F),
-            .len = 4,
-        };
-    }
-    return error.InvalidWtf8;
-}
-
-fn isFollowByte(byte: u8) bool {
-    return byte >= 0x80 and byte <= 0xBF;
-}
-
-fn writeStringLiteralCodepoint(writer: *std.Io.Writer, codepoint: u21) !void {
-    if (codepoint >= 0xD800 and codepoint <= 0xDFFF) {
-        var buf: [3]u8 = undefined;
-        const len = try wtf8Encode(codepoint, &buf);
-        for (buf[0..len]) |byte| try writer.print("\\x{X:0>2}", .{byte});
-        return;
-    }
-
-    switch (codepoint) {
-        '\n' => return writer.writeAll("\\n"),
-        '\r' => return writer.writeAll("\\r"),
-        '\t' => return writer.writeAll("\\t"),
-        '"' => return writer.writeAll("\\\""),
-        '\\' => return writer.writeAll("\\\\"),
-        0x20...0x21, 0x23...0x5B, 0x5D...0x7E => return writer.writeByte(@intCast(codepoint)),
-        0...8, 11...12, 14...0x1F, 0x7F => return writer.print("\\x{X:0>2}", .{codepoint}),
-        else => {
-            var buf: [4]u8 = undefined;
-            const len = try wtf8Encode(codepoint, &buf);
-            try writer.writeAll(buf[0..len]);
-        },
-    }
-}
-
+/// Returns `<prefix>/<group>/<value>.zig`.
 fn semanticValuePath(
     allocator: std.mem.Allocator,
     prefix: []const u8,
@@ -556,18 +510,21 @@ fn semanticValuePath(
     return try std.fmt.allocPrint(allocator, "{s}/{s}.zig", .{ group_dir, file_name });
 }
 
+/// Returns `<prefix>/<group>.zig`.
 fn semanticGroupFilePath(allocator: std.mem.Allocator, prefix: []const u8, group_name: []const u8) ![]const u8 {
     const group_dir = try semanticGroupDir(allocator, prefix, group_name);
     defer allocator.free(group_dir);
     return try std.fmt.allocPrint(allocator, "{s}.zig", .{group_dir});
 }
 
+/// Creates the parent directory for `path`, if it has one.
 fn createParentDirPath(dir: OutputDir, path: []const u8) !void {
     const parent = std.fs.path.dirname(path) orelse return;
     if (parent.len == 0) return;
     try dir.dir.createDirPath(dir.io, parent);
 }
 
+/// Returns the path a group file should use to import one of its value files.
 fn relativeGroupImportPath(
     allocator: std.mem.Allocator,
     group_path: []const u8,
@@ -586,10 +543,13 @@ fn relativeGroupImportPath(
     return try allocator.dupe(u8, value_path[prefix_len..]);
 }
 
+/// Thin alias for `pathName`; exists only because declaration names and path
+/// names might diverge later. Delete it if they do not.
 fn declName(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
     return pathName(allocator, name);
 }
 
+/// Returns `<prefix>/<group-dir>`, using legacy short directories when known.
 fn semanticGroupDir(allocator: std.mem.Allocator, prefix: []const u8, group_name: []const u8) ![]const u8 {
     const suffix = semanticGroupSuffix(group_name);
     if (suffix) |literal| {
@@ -601,6 +561,7 @@ fn semanticGroupDir(allocator: std.mem.Allocator, prefix: []const u8, group_name
     return try std.fmt.allocPrint(allocator, "{s}/{s}", .{ prefix, group_path });
 }
 
+/// Legacy directory spellings for generated property groups.
 fn semanticGroupSuffix(group_name: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, group_name, "Blocks")) return "blocks";
     if (std.mem.eql(u8, group_name, "CoreProperties")) return "props";
@@ -613,6 +574,7 @@ fn semanticGroupSuffix(group_name: []const u8) ?[]const u8 {
     return null;
 }
 
+/// Returns the PropertyValueAliases namespace for a generated group.
 fn valueAliasProperty(group_name: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, group_name, "Blocks")) return "blk";
     if (std.mem.eql(u8, group_name, "GeneralCategory")) return "gc";
@@ -624,6 +586,7 @@ fn valueAliasProperty(group_name: []const u8) ?[]const u8 {
     return null;
 }
 
+/// Converts a UCD name to an ASCII fragment usable in paths and identifiers.
 fn pathName(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
     var result: std.ArrayList(u8) = .empty;
     errdefer result.deinit(allocator);
@@ -657,6 +620,7 @@ fn pathName(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
     return try result.toOwnedSlice(allocator);
 }
 
+/// Returns DB group names in deterministic order.
 fn sortedGroupNames(allocator: std.mem.Allocator, db: *Db) ![][]const u8 {
     var names = try allocator.alloc([]const u8, db.groups.count());
     var it = db.groups.iterator();
@@ -666,6 +630,7 @@ fn sortedGroupNames(allocator: std.mem.Allocator, db: *Db) ![][]const u8 {
     return names;
 }
 
+/// Returns property value names in deterministic order.
 fn sortedValueNames(allocator: std.mem.Allocator, group: anytype) ![][]const u8 {
     var names = try allocator.alloc([]const u8, group.values.count());
     var it = group.values.iterator();
@@ -675,10 +640,12 @@ fn sortedValueNames(allocator: std.mem.Allocator, group: anytype) ![][]const u8 
     return names;
 }
 
+/// Lexical ordering predicate for generated-file stability.
 fn ltString(_: void, left: []const u8, right: []const u8) bool {
     return std.mem.order(u8, left, right) == .lt;
 }
 
+/// Returns whether this group gets a maps/<group>.zig module.
 fn isMappedGroup(name: []const u8) bool {
     inline for (mapped_groups) |mapped_group| {
         if (std.mem.eql(u8, name, mapped_group)) return true;
@@ -686,6 +653,7 @@ fn isMappedGroup(name: []const u8) bool {
     return false;
 }
 
+/// Property groups with generated maps/<group>.zig files.
 const mapped_groups = [_][]const u8{
     "Blocks",
     "CoreProperties",
@@ -697,6 +665,7 @@ const mapped_groups = [_][]const u8{
     "WordBreak",
 };
 
+/// Escapes bytes for Zig's `@"..."` identifier syntax.
 fn writeEscapedBytes(writer: *std.Io.Writer, bytes: []const u8) !void {
     for (bytes) |byte| {
         switch (byte) {
@@ -711,10 +680,12 @@ fn writeEscapedBytes(writer: *std.Io.Writer, bytes: []const u8) !void {
     }
 }
 
+/// Wraps a name for `{f}` formatting as a Zig identifier.
 fn identifier(name: []const u8) Identifier {
     return .{ .name = name };
 }
 
+/// Formats a string as either a bare identifier or `@"..."`.
 const Identifier = struct {
     name: []const u8,
 
@@ -730,6 +701,7 @@ const Identifier = struct {
     }
 };
 
+/// Returns whether Zig accepts `name` as an unquoted identifier.
 fn isBareIdentifier(name: []const u8) bool {
     if (name.len == 0) return false;
     if (!std.ascii.isAlphabetic(name[0]) and name[0] != '_') return false;
@@ -739,6 +711,7 @@ fn isBareIdentifier(name: []const u8) bool {
     return std.zig.Token.getKeyword(name) == null;
 }
 
+/// Common warning header for every generated file.
 const header_txt =
     \\//! Generated source!
     \\//! Do not modify!
@@ -746,21 +719,8 @@ const header_txt =
     \\
 ;
 
-fn wtf8Encode(codepoint: u21, buf: []u8) !usize {
-    if (codepoint >= 0xD800 and codepoint <= 0xDFFF) {
-        if (buf.len < 3) return error.NoSpaceLeft;
-        buf[0] = 0xE0 | @as(u8, @intCast(codepoint >> 12));
-        buf[1] = 0x80 | @as(u8, @intCast((codepoint >> 6) & 0x3F));
-        buf[2] = 0x80 | @as(u8, @intCast(codepoint & 0x3F));
-        return 3;
-    }
-    const len = std.unicode.utf8Encode(codepoint, buf) catch |err| switch (err) {
-        error.Utf8CannotEncodeSurrogateHalf => unreachable,
-        error.CodepointTooLarge => return err,
-    };
-    return @intCast(len);
-}
-
+// Covers the generated root graph and alias forwarding without needing the full
+// UCD corpus.
 test "emitRoots writes generated property roots" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -819,6 +779,7 @@ test "emitRoots writes generated property roots" {
     try testing.expect(std.mem.indexOf(u8, gencat_maps, "pub const Strs = ucd_tools.NamedMap(strs);") != null);
 }
 
+// Covers leaf payloads and historical path spelling for the three data views.
 test "emitRoots writes literal generated leaves" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
