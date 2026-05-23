@@ -38,26 +38,28 @@ pub fn build(b: *std.Build) void {
     // I'm just going to do this directly with custom executables, rather than
     // figure out how to follow the Approved Method within the Zig build system.
 
-    // Runicode UCD manifest audit
-    {
-        const runicode_gen_exe = b.addExecutable(.{
-            .name = "runicode-gen",
-            .root_module = b.createModule(.{
-                .target = b.graph.host,
-                .optimize = optimize,
-                .root_source_file = b.path("src/gen/runicode-gen.zig"),
-            }),
-        });
+    const runicode_gen_exe = b.addExecutable(.{
+        .name = "runicode-gen",
+        .root_module = b.createModule(.{
+            .target = b.graph.host,
+            .optimize = optimize,
+            .root_source_file = b.path("src/gen/runicode-gen.zig"),
+        }),
+    });
 
-        b.installArtifact(runicode_gen_exe);
+    b.installArtifact(runicode_gen_exe);
 
-        const run_runicode_gen = b.addRunArtifact(runicode_gen_exe);
-        run_runicode_gen.addArg("UCD");
+    const run_gen = b.addRunArtifact(runicode_gen_exe);
+    run_gen.addDirectoryArg(b.path("UCD"));
+    const generated_sets = run_gen.addOutputFileArg("sets.zig");
+    const generated_codepoints = run_gen.addOutputFileArg("codepoints.zig");
+    const generated_strs = run_gen.addOutputFileArg("strs.zig");
+    const generated_enums = run_gen.addOutputFileArg("enums.zig");
+    const generated_maps = run_gen.addOutputFileArg("maps.zig");
 
-        const run_runicode_gen_step = b.step("gen-runicode", "audit bundled Unicode data files");
+    const run_runicode_gen_step = b.step("gen-runicode", "audit bundled Unicode data files");
 
-        run_runicode_gen_step.dependOn(&run_runicode_gen.step);
-    }
+    run_runicode_gen_step.dependOn(&run_gen.step);
 
     // General Categories
     {
@@ -179,6 +181,48 @@ pub fn build(b: *std.Build) void {
 
     runicode_mod.addImport("runeset", runeset_dep.module("runeset"));
     runicode_mod.addImport("ucd-tools", tool_mod);
+
+    const generated_sets_mod = b.createModule(.{
+        .root_source_file = generated_sets,
+        .target = target,
+        .optimize = optimize,
+    });
+    generated_sets_mod.addImport("runeset", runeset_dep.module("runeset"));
+
+    const generated_codepoints_mod = b.createModule(.{
+        .root_source_file = generated_codepoints,
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const generated_strs_mod = b.createModule(.{
+        .root_source_file = generated_strs,
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const generated_enums_mod = b.createModule(.{
+        .root_source_file = generated_enums,
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const generated_maps_mod = b.createModule(.{
+        .root_source_file = generated_maps,
+        .target = target,
+        .optimize = optimize,
+    });
+    generated_maps_mod.addImport("ucd-tools", tool_mod);
+    generated_maps_mod.addImport("generated_sets", generated_sets_mod);
+    generated_maps_mod.addImport("generated_codepoints", generated_codepoints_mod);
+    generated_maps_mod.addImport("generated_strs", generated_strs_mod);
+    generated_maps_mod.addImport("generated_enums", generated_enums_mod);
+
+    runicode_mod.addImport("generated_sets", generated_sets_mod);
+    runicode_mod.addImport("generated_codepoints", generated_codepoints_mod);
+    runicode_mod.addImport("generated_strs", generated_strs_mod);
+    runicode_mod.addImport("generated_enums", generated_enums_mod);
+    runicode_mod.addImport("generated_maps", generated_maps_mod);
 
     const lib_unit_tests = b.addTest(.{
         .root_module = runicode_mod,

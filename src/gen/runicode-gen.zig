@@ -2,6 +2,7 @@ const std = @import("std");
 const audit = @import("ucd/audit.zig");
 const alias_data = @import("ucd/aliases.zig");
 const Db = @import("ucd/db.zig").Db;
+const emit = @import("ucd/emit.zig");
 const manifest = @import("ucd/manifest.zig");
 const parse = @import("ucd/parse.zig");
 const testing = std.testing;
@@ -23,7 +24,7 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const allocator = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(allocator);
-    if (argv.len < 2) return error.InvalidArguments;
+    if (argv.len != 7) return error.InvalidArguments;
 
     var ucd_dir = try std.Io.Dir.cwd().openDir(io, argv[1], .{ .iterate = true });
     defer ucd_dir.close(io);
@@ -44,6 +45,16 @@ pub fn main(init: std.process.Init) !void {
             else => {},
         }
     }
+
+    try emit.emitRoots(allocator, .{
+        .io = io,
+        .dir = std.Io.Dir.cwd(),
+        .sets_path = argv[2],
+        .codepoints_path = argv[3],
+        .strs_path = argv[4],
+        .enums_path = argv[5],
+        .maps_path = argv[6],
+    }, &db);
 
     var stdout_buf: [128]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
@@ -84,14 +95,15 @@ fn readCodepointPropertyFile(
 
         const range = try parse.parseCodepointRange(field_list.items[0]);
         const raw_property = entry.property orelse field_list.items[1];
-        const property = aliases.canonicalProperty(raw_property) orelse raw_property;
+        const canonical_property = aliases.canonicalProperty(raw_property) orelse raw_property;
+        const property = entry.namespace orelse canonical_property;
         const raw_value = if (entry.property != null)
             field_list.items[1]
         else if (field_list.items.len == 3)
             field_list.items[2]
         else
             "Y";
-        const value = aliases.canonicalValue(property, raw_value) orelse raw_value;
+        const value = aliases.canonicalValue(canonical_property, raw_value) orelse raw_value;
 
         if (is_missing) {
             try appendMissingAssignment(allocator, &missing_assignments, property, value, range);
@@ -243,7 +255,7 @@ test "codepoint property reader applies missing defaults" {
         .namespace = "Blocks",
     });
 
-    const block = db.property("Block").?;
+    const block = db.property("Blocks").?;
     const missing = block.value("No_Block").?;
     try testing.expectEqualSlices(u21, &.{ 0x0, 0x2 }, missing.codepoints.items);
     const basic_latin = block.value("Basic Latin").?;
@@ -278,7 +290,7 @@ test "codepoint property reader gives later missing defaults precedence" {
         .namespace = "BidiClass",
     });
 
-    const bidi = db.property("Bidi_Class").?;
+    const bidi = db.property("BidiClass").?;
     try testing.expectEqualSlices(u21, &.{0x0}, bidi.value("Left_To_Right").?.codepoints.items);
     try testing.expectEqualSlices(u21, &.{ 0x1, 0x2 }, bidi.value("Right_To_Left").?.codepoints.items);
 }
