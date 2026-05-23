@@ -6,7 +6,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // Tool module for internal use
-    const tool_mod = b.addModule("ucd_tools", .{
+    const tool_mod = b.createModule(.{
         .root_source_file = b.path("src/gen/ucd-tools.zig"),
         .target = target,
         .optimize = optimize,
@@ -38,120 +38,42 @@ pub fn build(b: *std.Build) void {
     // I'm just going to do this directly with custom executables, rather than
     // figure out how to follow the Approved Method within the Zig build system.
 
-    // General Categories
-    {
-        const gen_cat_exe = b.addExecutable(.{
-            .name = "gen_cat",
-            .root_module = b.createModule(.{
-                .target = target,
-                .optimize = optimize,
-                .root_source_file = b.path("src/gen/gen_cat.zig"),
-            }),
-        });
+    const runicode_gen_exe = b.addExecutable(.{
+        .name = "runicode-gen",
+        .root_module = b.createModule(.{
+            .target = b.graph.host,
+            .optimize = optimize,
+            .root_source_file = b.path("src/gen/runicode-gen.zig"),
+        }),
+    });
 
-        gen_cat_exe.root_module.addImport("ucd-tools", tool_mod);
+    b.installArtifact(runicode_gen_exe);
+    runicode_gen_exe.root_module.addImport("ezcaper", ezcaper_dep.module("ezcaper"));
+    runicode_gen_exe.root_module.addImport("runeset", runeset_dep.module("runeset"));
+    runicode_gen_exe.root_module.addImport("unicoder", unicoder_dep.module("unicoder"));
 
-        b.installArtifact(gen_cat_exe);
+    const run_gen = b.addRunArtifact(runicode_gen_exe);
+    run_gen.addDirectoryArg(b.path("UCD"));
+    const generated_dir = run_gen.addOutputDirectoryArg("runicode-generated");
+    const generated_runicode = generated_dir.path(b, "runicode.zig");
+    const install_generated_code = b.addInstallDirectory(.{
+        .source_dir = generated_dir,
+        .install_dir = .{ .custom = "gen" },
+        .install_subdir = "",
+        .exclude_extensions = &.{".DS_Store"},
+    });
+    install_generated_code.step.dependOn(&CleanInstallDir.create(b, .{ .custom = "gen" }, "").step);
 
-        const run_gencat = b.addRunArtifact(gen_cat_exe);
+    const run_runicode_gen_step = b.step("gen-runicode", "audit bundled Unicode data files");
 
-        const run_gencat_step = b.step("gen-cat", "generate files for General Categories");
-
-        run_gencat_step.dependOn(&run_gencat.step);
-    }
-
-    // Scripts
-    {
-        const scripts_exe = b.addExecutable(.{
-            .name = "scripts",
-            .root_module = b.createModule(.{
-                .target = target,
-                .optimize = optimize,
-                .root_source_file = b.path("src/gen/scripts.zig"),
-            }),
-        });
-
-        scripts_exe.root_module.addImport("ucd-tools", tool_mod);
-
-        b.installArtifact(scripts_exe);
-
-        const run_scripts = b.addRunArtifact(scripts_exe);
-
-        const run_scripts_step = b.step("scripts", "generate files for Scripts");
-
-        run_scripts_step.dependOn(&run_scripts.step);
-    }
-
-    // Blocks
-    {
-        const blocks_exe = b.addExecutable(.{
-            .name = "blocks",
-            .root_module = b.createModule(.{
-                .target = target,
-                .optimize = optimize,
-                .root_source_file = b.path("src/gen/blocks.zig"),
-            }),
-        });
-
-        blocks_exe.root_module.addImport("ucd-tools", tool_mod);
-
-        b.installArtifact(blocks_exe);
-
-        const run_blocks = b.addRunArtifact(blocks_exe);
-
-        const run_blocks_step = b.step("blocks", "generate files for blocks");
-
-        run_blocks_step.dependOn(&run_blocks.step);
-    }
-
-    // Core Properties
-    {
-        const props_exe = b.addExecutable(.{
-            .name = "props",
-            .root_module = b.createModule(.{
-                .target = target,
-                .optimize = optimize,
-                .root_source_file = b.path("src/gen/props.zig"),
-            }),
-        });
-
-        props_exe.root_module.addImport("ucd-tools", tool_mod);
-
-        b.installArtifact(props_exe);
-
-        const run_props = b.addRunArtifact(props_exe);
-
-        const run_props_step = b.step("props", "generate files for Properties");
-
-        run_props_step.dependOn(&run_props.step);
-    }
-
-    // Auxiliary Properties
-    {
-        const aux_props_exe = b.addExecutable(.{
-            .name = "aux_props",
-            .root_module = b.createModule(.{
-                .target = target,
-                .optimize = optimize,
-                .root_source_file = b.path("src/gen/aux_props.zig"),
-            }),
-        });
-
-        aux_props_exe.root_module.addImport("ucd-tools", tool_mod);
-
-        b.installArtifact(aux_props_exe);
-
-        const run_aux_props = b.addRunArtifact(aux_props_exe);
-
-        const run_aux_props_step = b.step("aux-props", "generate files for auxiliary properties");
-
-        run_aux_props_step.dependOn(&run_aux_props.step);
-    }
+    run_runicode_gen_step.dependOn(&run_gen.step);
+    const install_code_step = b.step("install-code", "Install generated runicode source into zig-out/gen");
+    install_code_step.dependOn(&install_generated_code.step);
 
     // Outward-facing Modules
 
     const runicode_mod = b.addModule("runicode", .{
-        .root_source_file = b.path("src/runicode.zig"),
+        .root_source_file = generated_runicode,
         .target = target,
         .optimize = optimize,
     });
@@ -159,19 +81,58 @@ pub fn build(b: *std.Build) void {
     runicode_mod.addImport("runeset", runeset_dep.module("runeset"));
     runicode_mod.addImport("ucd-tools", tool_mod);
 
-    const lib_unit_tests = b.addTest(.{
-        .root_module = runicode_mod,
-    });
-
-    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
-
     const tool_unit_tests = b.addTest(.{
         .root_module = tool_mod,
     });
 
     const run_tool_unit_tests = b.addRunArtifact(tool_unit_tests);
 
+    const gen_unit_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("src/gen/runicode-gen.zig"),
+        }),
+    });
+    gen_unit_tests.root_module.addImport("runeset", runeset_dep.module("runeset"));
+    gen_unit_tests.root_module.addImport("ezcaper", ezcaper_dep.module("ezcaper"));
+    gen_unit_tests.root_module.addImport("unicoder", unicoder_dep.module("unicoder"));
+
+    const run_gen_unit_tests = b.addRunArtifact(gen_unit_tests);
+
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_tool_unit_tests.step);
+    test_step.dependOn(&run_gen_unit_tests.step);
 }
+
+const CleanInstallDir = struct {
+    step: std.Build.Step,
+    install_dir: std.Build.InstallDir,
+    install_subdir: []const u8,
+
+    fn create(b: *std.Build, install_dir: std.Build.InstallDir, install_subdir: []const u8) *CleanInstallDir {
+        const clean = b.allocator.create(CleanInstallDir) catch @panic("OOM");
+        clean.* = .{
+            .step = std.Build.Step.init(.{
+                .id = .custom,
+                .name = b.fmt("clean install {s}/", .{install_subdir}),
+                .owner = b,
+                .makeFn = make,
+            }),
+            .install_dir = install_dir.dupe(b),
+            .install_subdir = b.dupe(install_subdir),
+        };
+        return clean;
+    }
+
+    fn make(step: *std.Build.Step, options: std.Build.Step.MakeOptions) !void {
+        _ = options;
+        const clean: *CleanInstallDir = @fieldParentPtr("step", step);
+        const b = step.owner;
+        const io = b.graph.io;
+        const dest = b.getInstallPath(clean.install_dir, clean.install_subdir);
+        std.Io.Dir.cwd().deleteTree(io, dest) catch |err| {
+            return step.fail("unable to remove install directory '{s}': {t}", .{ dest, err });
+        };
+    }
+};

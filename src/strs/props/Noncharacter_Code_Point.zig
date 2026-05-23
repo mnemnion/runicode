@@ -1,4 +1,0 @@
-//! Generated source!
-//! Do not modify!
-
-pub const Noncharacter_Code_Point = "\u{fdd0}\u{fdd1}\u{fdd2}\u{fdd3}\u{fdd4}\u{fdd5}\u{fdd6}\u{fdd7}\u{fdd8}\u{fdd9}\u{fdda}\u{fddb}\u{fddc}\u{fddd}\u{fdde}\u{fddf}\u{fde0}\u{fde1}\u{fde2}\u{fde3}\u{fde4}\u{fde5}\u{fde6}\u{fde7}\u{fde8}\u{fde9}\u{fdea}\u{fdeb}\u{fdec}\u{fded}\u{fdee}\u{fdef}\u{fffe}\u{ffff}\u{1fffe}\u{1ffff}\u{2fffe}\u{2ffff}\u{3fffe}\u{3ffff}\u{4fffe}\u{4ffff}\u{5fffe}\u{5ffff}\u{6fffe}\u{6ffff}\u{7fffe}\u{7ffff}\u{8fffe}\u{8ffff}\u{9fffe}\u{9ffff}\u{afffe}\u{affff}\u{bfffe}\u{bffff}\u{cfffe}\u{cffff}\u{dfffe}\u{dffff}\u{efffe}\u{effff}\u{ffffe}\u{fffff}\u{10fffe}\u{10ffff}";

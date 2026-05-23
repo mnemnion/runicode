@@ -1,7 +1,0 @@
-//! Generated source!
-//! Do not modify!
-
-const RuneSet = @import("runeset").RuneSet;
-
-// Length: 19.
-pub const SContinue = RuneSet{ .body = &.{ 0xc00300000000000, 0x0, 0x800e81202000, 0x0, 0x4000000000000000, 0x20000000, 0x3000, 0x100000000000000, 0x100000000, 0x1, 0x1, 0x3300000000000000, 0x1000000000, 0xc003000, 0x801330000, 0x60000001b0000, 0x2, 0x180000, 0x104 } };

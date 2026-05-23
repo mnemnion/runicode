@@ -1,7 +1,0 @@
-//! Generated source!
-//! Do not modify!
-
-const RuneSet = @import("runeset").RuneSet;
-
-// Length: 24.
-pub const Katakana = RuneSet{ .body = &.{ 0x0, 0x0, 0x1800800001000, 0x14, 0x800000020, 0x388d, 0x6200000000000000, 0xc000000, 0x31, 0x8000000000000000, 0xffffffff, 0xfffffffe00000000, 0x60, 0xffffff, 0xffffffffffffffff, 0x7fffffffffff0000, 0xffff000000000000, 0xffffffffffffffff, 0xffffffff1e000000, 0x30bf0000fffbff0e, 0x1, 0x700000000, 0xf000200000, 0x6fef000000000000 } };
