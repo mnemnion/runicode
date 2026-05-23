@@ -7,6 +7,8 @@
 
 // Forward-import ezcaper and runeset modules
 
+const std = @import("std");
+
 pub const ezcaper = @import("ezcaper");
 
 pub const runeset = @import("runeset");
@@ -17,10 +19,6 @@ pub const props_map = @import("props_map.zig");
 pub const NamedMap = props_map.NamedMap;
 pub const NamedRuneSetMap = props_map.NamedRuneSetMap;
 pub const normalizePropName = props_map.normalizePropName;
-
-comptime {
-    std.testing.refAllDecls(props_map);
-}
 
 pub fn ltString(_: void, l: []const u8, r: []const u8) bool {
     return std.mem.order(u8, l, r) == .lt;

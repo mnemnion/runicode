@@ -56,6 +56,33 @@ pub const Aliases = struct {
         return null;
     }
 
+    pub fn valueAliases(
+        aliases: *const Aliases,
+        allocator: std.mem.Allocator,
+        property: []const u8,
+        canonical_value: []const u8,
+    ) ![][]const u8 {
+        const canonical_property = aliases.canonicalProperty(property) orelse property;
+        var result: std.ArrayList([]const u8) = .empty;
+        errdefer result.deinit(allocator);
+
+        var property_it = aliases.values.iterator();
+        while (property_it.next()) |property_entry| {
+            const alias_property = aliases.canonicalProperty(property_entry.key_ptr.*) orelse property_entry.key_ptr.*;
+            if (!std.mem.eql(u8, alias_property, canonical_property)) continue;
+
+            var value_it = property_entry.value_ptr.iterator();
+            while (value_it.next()) |value_entry| {
+                if (std.mem.eql(u8, value_entry.value_ptr.*, canonical_value)) {
+                    try result.append(allocator, value_entry.key_ptr.*);
+                }
+            }
+        }
+
+        std.mem.sort([]const u8, result.items, {}, ltString);
+        return try result.toOwnedSlice(allocator);
+    }
+
     pub fn loadPropertyLine(aliases: *Aliases, line: []const u8) !void {
         var field_list = try parse.fields(aliases.allocator, line);
         defer field_list.deinit(aliases.allocator);
@@ -135,6 +162,10 @@ fn isCanonicalCombiningClass(property: []const u8) bool {
         std.mem.eql(u8, property, "Canonical_Combining_Class");
 }
 
+fn ltString(_: void, left: []const u8, right: []const u8) bool {
+    return std.mem.order(u8, left, right) == .lt;
+}
+
 fn putOwned(
     map: *std.StringHashMapUnmanaged([]const u8),
     allocator: std.mem.Allocator,
@@ -210,4 +241,22 @@ test "ccc value aliases resolve numeric short and long names to long name" {
     try testing.expectEqualStrings("Not_Reordered", aliases.canonicalValue("ccc", "NR").?);
     try testing.expectEqualStrings("Not_Reordered", aliases.canonicalValue("ccc", "Not_Reordered").?);
     try testing.expectEqualStrings("Not_Reordered", aliases.canonicalValue("Canonical_Combining_Class", "0").?);
+}
+
+test "value aliases returns aliases scoped to a property namespace" {
+    var aliases = Aliases.init(testing.allocator);
+    defer aliases.deinit();
+
+    try aliases.loadPropertyLine("gc ; General_Category");
+    try aliases.loadPropertyLine("sc ; Script");
+    try aliases.loadPropertyValueLine("gc ; C ; Other");
+    try aliases.loadPropertyValueLine("sc ; Zyyy ; Common");
+    try aliases.loadPropertyValueLine("sc ; Latn ; Latin");
+
+    const latin_aliases = try aliases.valueAliases(testing.allocator, "sc", "Latin");
+    defer testing.allocator.free(latin_aliases);
+
+    try testing.expectEqual(@as(usize, 2), latin_aliases.len);
+    try testing.expectEqualStrings("Latin", latin_aliases[0]);
+    try testing.expectEqualStrings("Latn", latin_aliases[1]);
 }

@@ -1,13 +1,15 @@
 const std = @import("std");
 const testing = std.testing;
 
+const Aliases = @import("aliases.zig").Aliases;
 const Db = @import("db.zig").Db;
 const Range = @import("parse.zig").Range;
-const RuneSet = LocalRuneSet;
+const RuneSet = @import("runeset").RuneSet;
 
 pub const OutputDir = struct {
     io: std.Io,
     dir: std.Io.Dir,
+    runicode_path: []const u8 = "runicode.zig",
     sets_path: []const u8 = "sets.zig",
     codepoints_path: []const u8 = "codepoints.zig",
     strs_path: []const u8 = "strs.zig",
@@ -15,15 +17,26 @@ pub const OutputDir = struct {
     maps_path: []const u8 = "maps.zig",
 };
 
-pub fn emitRoots(allocator: std.mem.Allocator, dir: OutputDir, db: *Db) !void {
+pub fn emitRoots(allocator: std.mem.Allocator, dir: OutputDir, db: *Db, aliases: *const Aliases) !void {
     const group_names = try sortedGroupNames(allocator, db);
     defer allocator.free(group_names);
 
-    try writeRootFile(dir, dir.strs_path, writeStrsRoot, .{ group_names, db });
-    try writeRootFile(dir, dir.codepoints_path, writeCodepointsRoot, .{ group_names, db });
-    try writeRootFile(dir, dir.sets_path, writeSetsRoot, .{ allocator, group_names, db });
+    try writeDataFiles(allocator, dir, group_names, db, aliases);
     try writeRootFile(dir, dir.enums_path, writeEnumsRoot, .{ group_names, db });
-    try writeRootFile(dir, dir.maps_path, writeMapsRoot, .{group_names});
+    try writeMapsFiles(allocator, dir, group_names, db);
+    try writeRootFile(dir, dir.runicode_path, writeRunicodeRoot, .{});
+}
+
+fn writeDataFiles(
+    allocator: std.mem.Allocator,
+    dir: OutputDir,
+    group_names: []const []const u8,
+    db: *Db,
+    aliases: *const Aliases,
+) !void {
+    try writeSetsFiles(allocator, dir, group_names, db, aliases);
+    try writeCodepointsFiles(allocator, dir, group_names, db, aliases);
+    try writeStrsFiles(allocator, dir, group_names, db, aliases);
 }
 
 fn writeRootFile(
@@ -41,68 +54,259 @@ fn writeRootFile(
     try file_writer.interface.flush();
 }
 
-fn writeStrsRoot(writer: *std.Io.Writer, group_names: []const []const u8, db: *Db) !void {
-    try writer.writeAll(header_txt);
-    try writer.writeAll(strs_prelude);
-    for (group_names) |group_name| {
-        const group = db.property(group_name).?;
-        const value_names = try sortedValueNames(group.allocator, group);
-        defer group.allocator.free(value_names);
-
-        try writer.print("pub const {f} = struct {{\n", .{identifier(group_name)});
-        for (value_names) |value_name| {
-            const value = group.value(value_name).?;
-            try writer.print("    pub const {f} = expandWtf8(&.{{", .{identifier(value_name)});
-            try writeRanges(writer, value.ranges.items);
-            try writer.writeAll(" });\n");
-        }
-        try writer.writeAll("};\n\n");
-    }
-}
-
-fn writeCodepointsRoot(writer: *std.Io.Writer, group_names: []const []const u8, db: *Db) !void {
-    try writer.writeAll(header_txt);
-    try writer.writeAll(codepoints_prelude);
-    for (group_names) |group_name| {
-        const group = db.property(group_name).?;
-        const value_names = try sortedValueNames(group.allocator, group);
-        defer group.allocator.free(value_names);
-
-        try writer.print("pub const {f} = struct {{\n", .{identifier(group_name)});
-        for (value_names) |value_name| {
-            const value = group.value(value_name).?;
-            try writer.print("    pub const {f} = expandCodepoints(&.{{", .{identifier(value_name)});
-            try writeRanges(writer, value.ranges.items);
-            try writer.writeAll(" });\n");
-        }
-        try writer.writeAll("};\n\n");
-    }
-}
-
-fn writeSetsRoot(
-    writer: *std.Io.Writer,
+fn writeStrsFiles(
     allocator: std.mem.Allocator,
+    dir: OutputDir,
     group_names: []const []const u8,
     db: *Db,
+    aliases: *const Aliases,
 ) !void {
+    try dir.dir.createDirPath(dir.io, "strs");
+
+    var root_file = try dir.dir.createFile(dir.io, dir.strs_path, .{ .lock = .exclusive });
+    defer root_file.close(dir.io);
+    var root_buf: [4096]u8 = undefined;
+    var root_writer = root_file.writer(dir.io, &root_buf);
+    const writer = &root_writer.interface;
+
     try writer.writeAll(header_txt);
-    try writer.writeAll("const RuneSet = @import(\"runeset\").RuneSet;\n\n");
     for (group_names) |group_name| {
         const group = db.property(group_name).?;
         const value_names = try sortedValueNames(group.allocator, group);
         defer group.allocator.free(value_names);
 
-        try writer.print("pub const {f} = struct {{\n", .{identifier(group_name)});
+        const group_dir = try semanticGroupDir(allocator, "strs", group_name);
+        defer allocator.free(group_dir);
+        try dir.dir.createDirPath(dir.io, group_dir);
+
+        const group_path = try semanticGroupFilePath(allocator, "strs", group_name);
+        defer allocator.free(group_path);
+        try writer.print("pub const {f} = @import(\"{s}\");\n", .{ identifier(group_name), group_path });
+
+        var group_file = try dir.dir.createFile(dir.io, group_path, .{ .lock = .exclusive });
+        defer group_file.close(dir.io);
+        var group_buf: [4096]u8 = undefined;
+        var group_writer = group_file.writer(dir.io, &group_buf);
+        const group_out = &group_writer.interface;
+        try group_out.writeAll(header_txt);
+
         for (value_names) |value_name| {
             const value = group.value(value_name).?;
-            const rune_set = try RuneSet.createFromRanges(value.ranges.items, allocator);
-            defer rune_set.deinit(allocator);
-            const set_name = try ownedIdentifier(allocator, value_name);
-            defer if (set_name.ptr != value_name.ptr) allocator.free(set_name);
-            try writer.print("    // Length: {d}.\n    ", .{rune_set.body.len});
-            try rune_set.serialize(writer, .public, set_name);
+            const decl_name = try declName(allocator, value_name);
+            defer allocator.free(decl_name);
+            const value_path = try semanticValuePath(allocator, "strs", group_name, value_name);
+            defer allocator.free(value_path);
+            const import_path = try relativeGroupImportPath(allocator, group_path, value_path);
+            defer allocator.free(import_path);
+            try writeStrsValueFile(allocator, dir, value_path, decl_name, value.ranges.items);
+            try group_out.print("pub const {f} = @import(\"{s}\").{f};\n", .{ identifier(decl_name), import_path, identifier(decl_name) });
         }
-        try writer.writeAll("};\n\n");
+        try writeGroupValueAliases(allocator, group_out, group_name, value_names, aliases);
+        try group_out.flush();
+    }
+    try writer.flush();
+}
+
+fn writeStrsValueFile(allocator: std.mem.Allocator, dir: OutputDir, path: []const u8, decl_name: []const u8, ranges: []const Range) !void {
+    var file = try dir.dir.createFile(dir.io, path, .{ .lock = .exclusive });
+    defer file.close(dir.io);
+    var buf: [4096]u8 = undefined;
+    var file_writer = file.writer(dir.io, &buf);
+    const writer = &file_writer.interface;
+
+    const rune_set = try createRuneSetFromRanges(ranges, allocator);
+    defer rune_set.deinit(allocator);
+
+    try writer.writeAll(header_txt);
+    try writer.print("pub const {f} = ", .{identifier(decl_name)});
+    try writeStringLiteral(writer, rune_set);
+    try writer.writeAll(";\n");
+    try writer.flush();
+}
+
+fn writeCodepointsFiles(
+    allocator: std.mem.Allocator,
+    dir: OutputDir,
+    group_names: []const []const u8,
+    db: *Db,
+    aliases: *const Aliases,
+) !void {
+    try dir.dir.createDirPath(dir.io, "codepoints");
+
+    var root_file = try dir.dir.createFile(dir.io, dir.codepoints_path, .{ .lock = .exclusive });
+    defer root_file.close(dir.io);
+    var root_buf: [4096]u8 = undefined;
+    var root_writer = root_file.writer(dir.io, &root_buf);
+    const writer = &root_writer.interface;
+
+    try writer.writeAll(header_txt);
+    for (group_names) |group_name| {
+        const group = db.property(group_name).?;
+        const value_names = try sortedValueNames(group.allocator, group);
+        defer group.allocator.free(value_names);
+
+        const group_dir = try semanticGroupDir(allocator, "codepoints", group_name);
+        defer allocator.free(group_dir);
+        try dir.dir.createDirPath(dir.io, group_dir);
+
+        const group_path = try semanticGroupFilePath(allocator, "codepoints", group_name);
+        defer allocator.free(group_path);
+        try writer.print("pub const {f} = @import(\"{s}\");\n", .{ identifier(group_name), group_path });
+
+        var group_file = try dir.dir.createFile(dir.io, group_path, .{ .lock = .exclusive });
+        defer group_file.close(dir.io);
+        var group_buf: [4096]u8 = undefined;
+        var group_writer = group_file.writer(dir.io, &group_buf);
+        const group_out = &group_writer.interface;
+        try group_out.writeAll(header_txt);
+
+        for (value_names) |value_name| {
+            const value = group.value(value_name).?;
+            const decl_name = try declName(allocator, value_name);
+            defer allocator.free(decl_name);
+            const value_path = try semanticValuePath(allocator, "codepoints", group_name, value_name);
+            defer allocator.free(value_path);
+            const import_path = try relativeGroupImportPath(allocator, group_path, value_path);
+            defer allocator.free(import_path);
+            try writeCodepointsValueFile(allocator, dir, value_path, decl_name, value.ranges.items);
+            try group_out.print("pub const {f} = @import(\"{s}\").{f};\n", .{ identifier(decl_name), import_path, identifier(decl_name) });
+        }
+        try writeGroupValueAliases(allocator, group_out, group_name, value_names, aliases);
+        try group_out.flush();
+    }
+    try writer.flush();
+}
+
+fn writeCodepointsValueFile(allocator: std.mem.Allocator, dir: OutputDir, path: []const u8, decl_name: []const u8, ranges: []const Range) !void {
+    var file = try dir.dir.createFile(dir.io, path, .{ .lock = .exclusive });
+    defer file.close(dir.io);
+    var buf: [4096]u8 = undefined;
+    var file_writer = file.writer(dir.io, &buf);
+    const writer = &file_writer.interface;
+
+    const rune_set = try createRuneSetFromRanges(ranges, allocator);
+    defer rune_set.deinit(allocator);
+
+    try writer.writeAll(header_txt);
+    try writer.print("pub const {f}: [{d}]u21 = .{{ ", .{ identifier(decl_name), rune_set.runeCount() });
+    try writeCodepoints(writer, rune_set);
+    try writer.writeAll("};\n");
+    try writer.flush();
+}
+
+fn writeSetsFiles(
+    allocator: std.mem.Allocator,
+    dir: OutputDir,
+    group_names: []const []const u8,
+    db: *Db,
+    aliases: *const Aliases,
+) !void {
+    try dir.dir.createDirPath(dir.io, "sets");
+
+    var root_file = try dir.dir.createFile(dir.io, dir.sets_path, .{ .lock = .exclusive });
+    defer root_file.close(dir.io);
+    var root_buf: [4096]u8 = undefined;
+    var root_writer = root_file.writer(dir.io, &root_buf);
+    const writer = &root_writer.interface;
+
+    try writer.writeAll(header_txt);
+    for (group_names) |group_name| {
+        const group = db.property(group_name).?;
+        const value_names = try sortedValueNames(group.allocator, group);
+        defer group.allocator.free(value_names);
+
+        const group_dir = try semanticGroupDir(allocator, "sets", group_name);
+        defer allocator.free(group_dir);
+        try dir.dir.createDirPath(dir.io, group_dir);
+
+        const group_path = try semanticGroupFilePath(allocator, "sets", group_name);
+        defer allocator.free(group_path);
+        try writer.print("pub const {f} = @import(\"{s}\");\n", .{ identifier(group_name), group_path });
+
+        var group_file = try dir.dir.createFile(dir.io, group_path, .{ .lock = .exclusive });
+        defer group_file.close(dir.io);
+        var group_buf: [4096]u8 = undefined;
+        var group_writer = group_file.writer(dir.io, &group_buf);
+        const group_out = &group_writer.interface;
+        try group_out.writeAll(header_txt);
+
+        for (value_names) |value_name| {
+            const value = group.value(value_name).?;
+            const decl_name = try declName(allocator, value_name);
+            defer allocator.free(decl_name);
+            const value_path = try semanticValuePath(allocator, "sets", group_name, value_name);
+            defer allocator.free(value_path);
+            const import_path = try relativeGroupImportPath(allocator, group_path, value_path);
+            defer allocator.free(import_path);
+            try writeSetsValueFile(allocator, dir, value_path, decl_name, value.ranges.items);
+            try group_out.print("pub const {f} = @import(\"{s}\").{f};\n", .{ identifier(decl_name), import_path, identifier(decl_name) });
+        }
+        try writeGroupValueAliases(allocator, group_out, group_name, value_names, aliases);
+        try group_out.flush();
+    }
+    try writer.flush();
+}
+
+fn writeSetsValueFile(allocator: std.mem.Allocator, dir: OutputDir, path: []const u8, decl_name: []const u8, ranges: []const Range) !void {
+    var file = try dir.dir.createFile(dir.io, path, .{ .lock = .exclusive });
+    defer file.close(dir.io);
+    var buf: [4096]u8 = undefined;
+    var file_writer = file.writer(dir.io, &buf);
+    const writer = &file_writer.interface;
+
+    const rune_set = try createRuneSetFromRanges(ranges, allocator);
+    defer rune_set.deinit(allocator);
+
+    try writer.writeAll(header_txt);
+    try writer.writeAll("const RuneSet = @import(\"runeset\").RuneSet;\n\n");
+    try writer.print("/// Length: {d} words.\n", .{rune_set.body.len});
+    try rune_set.serialize(writer, .public, decl_name);
+    try writer.flush();
+}
+
+fn writeGroupValueAliases(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    group_name: []const u8,
+    value_names: []const []const u8,
+    aliases: *const Aliases,
+) !void {
+    const alias_property = valueAliasProperty(group_name) orelse return;
+
+    var seen_decls: std.StringHashMapUnmanaged(void) = .empty;
+    defer freeSeenMatches(allocator, &seen_decls);
+
+    for (value_names) |value_name| {
+        const value_decl = try declName(allocator, value_name);
+        errdefer allocator.free(value_decl);
+        const result = try seen_decls.getOrPut(allocator, value_decl);
+        if (result.found_existing) allocator.free(value_decl);
+    }
+
+    for (value_names) |value_name| {
+        const target_decl = try declName(allocator, value_name);
+        defer allocator.free(target_decl);
+        const canonical_value = aliases.canonicalValue(alias_property, value_name) orelse
+            aliases.canonicalValue(alias_property, target_decl) orelse
+            value_name;
+        const value_aliases = try aliases.valueAliases(allocator, alias_property, canonical_value);
+        defer allocator.free(value_aliases);
+
+        for (value_aliases) |alias| {
+            const alias_decl = try declName(allocator, alias);
+            errdefer allocator.free(alias_decl);
+            if (std.mem.eql(u8, alias_decl, target_decl)) {
+                allocator.free(alias_decl);
+                continue;
+            }
+
+            const result = try seen_decls.getOrPut(allocator, alias_decl);
+            if (result.found_existing) {
+                allocator.free(alias_decl);
+                continue;
+            }
+            try writer.print("pub const {f} = {f};\n", .{ identifier(alias_decl), identifier(target_decl) });
+        }
     }
 }
 
@@ -115,48 +319,342 @@ fn writeEnumsRoot(writer: *std.Io.Writer, group_names: []const []const u8, db: *
 
         try writer.print("pub const {f} = enum {{\n", .{identifier(group_name)});
         for (value_names) |value_name| {
-            try writer.print("    {f},\n", .{identifier(value_name)});
+            const decl_name = try declName(group.allocator, value_name);
+            defer group.allocator.free(decl_name);
+            try writer.print("    {f},\n", .{identifier(decl_name)});
         }
         try writer.writeAll("};\n\n");
     }
 }
 
-fn writeMapsRoot(writer: *std.Io.Writer, group_names: []const []const u8) !void {
+fn writeRunicodeRoot(writer: *std.Io.Writer) !void {
     try writer.writeAll(header_txt);
     try writer.writeAll(
-        \\const ucd_tools = @import("ucd-tools");
-        \\const sets = @import("generated_sets");
-        \\const codepoints = @import("generated_codepoints");
-        \\const strs = @import("generated_strs");
-        \\const enums = @import("generated_enums");
+        \\/// Unicode property data as RuneSet values.
+        \\pub const sets = @import("sets.zig");
         \\
+        \\/// Unicode property data as sorted codepoint slices.
+        \\pub const codepoints = @import("codepoints.zig");
+        \\
+        \\/// Unicode property data as UTF-8 strings.
+        \\pub const strs = @import("strs.zig");
+        \\
+        \\/// Unicode property enum types.
+        \\pub const enums = @import("enums.zig");
+        \\
+        \\/// Loose-matching maps for Unicode property namespaces.
+        \\pub const maps = @import("maps.zig");
+        \\
+        \\/// Compile-time constructor for loose-matching property maps.
+        \\pub const NamedMap = @import("ucd-tools").NamedMap;
         \\
     );
+}
+
+fn writeMapsFiles(
+    allocator: std.mem.Allocator,
+    dir: OutputDir,
+    group_names: []const []const u8,
+    db: *Db,
+) !void {
+    try dir.dir.createDirPath(dir.io, "maps");
+
+    var root_file = try dir.dir.createFile(dir.io, dir.maps_path, .{ .lock = .exclusive });
+    defer root_file.close(dir.io);
+    var root_buf: [4096]u8 = undefined;
+    var root_writer = root_file.writer(dir.io, &root_buf);
+    const writer = &root_writer.interface;
+
+    try writer.writeAll(header_txt);
 
     for (group_names) |group_name| {
-        try writer.print(
-            \\pub const {f} = struct {{
-            \\    pub const Sets = ucd_tools.NamedMap(sets.{f});
-            \\    pub const Codepoints = ucd_tools.NamedMap(codepoints.{f});
-            \\    pub const Strs = ucd_tools.NamedMap(strs.{f});
-            \\    pub const Enum = enums.{f};
-            \\}};
-            \\
-            \\
-        , .{
-            identifier(group_name),
-            identifier(group_name),
-            identifier(group_name),
-            identifier(group_name),
-            identifier(group_name),
-        });
+        if (!isMappedGroup(group_name)) continue;
+
+        _ = db.property(group_name).?;
+
+        const group_path = try semanticGroupFilePath(allocator, "maps", group_name);
+        defer allocator.free(group_path);
+        try createParentDirPath(dir, group_path);
+        try writeMapGroupFile(allocator, dir, group_path, group_name);
+        try writer.print("pub const {f} = @import(\"{s}\");\n", .{ identifier(group_name), group_path });
+    }
+    try writer.flush();
+}
+
+fn writeMapGroupFile(allocator: std.mem.Allocator, dir: OutputDir, path: []const u8, group_name: []const u8) !void {
+    var file = try dir.dir.createFile(dir.io, path, .{ .lock = .exclusive });
+    defer file.close(dir.io);
+    var buf: [4096]u8 = undefined;
+    var file_writer = file.writer(dir.io, &buf);
+    const writer = &file_writer.interface;
+
+    const sets_target = try semanticGroupFilePath(allocator, "sets", group_name);
+    defer allocator.free(sets_target);
+    const sets_path = try relativeImportPath(allocator, path, sets_target);
+    defer allocator.free(sets_path);
+    const codepoints_target = try semanticGroupFilePath(allocator, "codepoints", group_name);
+    defer allocator.free(codepoints_target);
+    const codepoints_path = try relativeImportPath(allocator, path, codepoints_target);
+    defer allocator.free(codepoints_path);
+    const strs_target = try semanticGroupFilePath(allocator, "strs", group_name);
+    defer allocator.free(strs_target);
+    const strs_path = try relativeImportPath(allocator, path, strs_target);
+    defer allocator.free(strs_path);
+    const enums_path = try relativeImportPath(allocator, path, "enums.zig");
+    defer allocator.free(enums_path);
+
+    try writer.writeAll(header_txt);
+    try writer.print(
+        \\const ucd_tools = @import("ucd-tools");
+        \\const sets = @import("{s}");
+        \\const codepoints = @import("{s}");
+        \\const strs = @import("{s}");
+        \\const enums = @import("{s}");
+        \\
+        \\
+        \\
+    , .{ sets_path, codepoints_path, strs_path, enums_path });
+    try writer.print(
+        \\pub const Sets = ucd_tools.NamedMap(sets);
+        \\pub const Codepoints = ucd_tools.NamedMap(codepoints);
+        \\pub const Strs = ucd_tools.NamedMap(strs);
+        \\pub const Enum = enums.{f};
+        \\
+    , .{
+        identifier(group_name),
+    });
+    try writer.flush();
+}
+
+fn relativeImportPath(allocator: std.mem.Allocator, from_path: []const u8, target_path: []const u8) ![]const u8 {
+    const from_dir = std.fs.path.dirname(from_path) orelse "";
+    var result: std.ArrayList(u8) = .empty;
+    errdefer result.deinit(allocator);
+
+    var components = std.mem.tokenizeScalar(u8, from_dir, '/');
+    while (components.next()) |_| try result.appendSlice(allocator, "../");
+    try result.appendSlice(allocator, target_path);
+    return try result.toOwnedSlice(allocator);
+}
+
+fn freeSeenMatches(allocator: std.mem.Allocator, seen_matches: *std.StringHashMapUnmanaged(void)) void {
+    var it = seen_matches.keyIterator();
+    while (it.next()) |key| allocator.free(key.*);
+    seen_matches.deinit(allocator);
+}
+
+fn createRuneSetFromRanges(ranges: []const Range, allocator: std.mem.Allocator) !RuneSet {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
+
+    for (ranges) |range| {
+        var codepoint = range.first;
+        while (codepoint <= range.last) : (codepoint += 1) {
+            var buf: [4]u8 = undefined;
+            const len = try wtf8Encode(codepoint, &buf);
+            try bytes.appendSlice(allocator, buf[0..len]);
+        }
+    }
+
+    return try RuneSet.createFromConstString(bytes.items, allocator);
+}
+
+fn writeCodepoints(writer: *std.Io.Writer, rune_set: RuneSet) !void {
+    var iter = rune_set.iterateRunes();
+    while (iter.next()) |rune| {
+        const codepoint = (try wtf8Decode(rune)).codepoint;
+        try writer.print("0x{X}, ", .{codepoint});
     }
 }
 
-fn writeRanges(writer: *std.Io.Writer, ranges: []const Range) !void {
-    for (ranges) |range| {
-        try writer.print(" .{{ .first = 0x{X}, .last = 0x{X} }},", .{ range.first, range.last });
+fn writeStringLiteral(writer: *std.Io.Writer, rune_set: RuneSet) !void {
+    try writer.writeByte('"');
+    var iter = rune_set.iterateRunes();
+    while (iter.next()) |rune| {
+        const codepoint = (try wtf8Decode(rune)).codepoint;
+        try writeStringLiteralCodepoint(writer, codepoint);
     }
+    try writer.writeByte('"');
+}
+
+const DecodedWtf8 = struct {
+    codepoint: u21,
+    len: usize,
+};
+
+fn wtf8Decode(bytes: []const u8) !DecodedWtf8 {
+    if (bytes.len == 0) return error.InvalidWtf8;
+    const first = bytes[0];
+    if (first <= 0x7F) return .{ .codepoint = first, .len = 1 };
+    if (first >= 0xC0 and first <= 0xDF) {
+        if (bytes.len < 2 or !isFollowByte(bytes[1])) return error.InvalidWtf8;
+        return .{
+            .codepoint = (@as(u21, first & 0x1F) << 6) | @as(u21, bytes[1] & 0x3F),
+            .len = 2,
+        };
+    }
+    if (first >= 0xE0 and first <= 0xEF) {
+        if (bytes.len < 3 or !isFollowByte(bytes[1]) or !isFollowByte(bytes[2])) return error.InvalidWtf8;
+        return .{
+            .codepoint = (@as(u21, first & 0x0F) << 12) |
+                (@as(u21, bytes[1] & 0x3F) << 6) |
+                @as(u21, bytes[2] & 0x3F),
+            .len = 3,
+        };
+    }
+    if (first >= 0xF0 and first <= 0xF7) {
+        if (bytes.len < 4 or !isFollowByte(bytes[1]) or !isFollowByte(bytes[2]) or !isFollowByte(bytes[3])) return error.InvalidWtf8;
+        return .{
+            .codepoint = (@as(u21, first & 0x07) << 18) |
+                (@as(u21, bytes[1] & 0x3F) << 12) |
+                (@as(u21, bytes[2] & 0x3F) << 6) |
+                @as(u21, bytes[3] & 0x3F),
+            .len = 4,
+        };
+    }
+    return error.InvalidWtf8;
+}
+
+fn isFollowByte(byte: u8) bool {
+    return byte >= 0x80 and byte <= 0xBF;
+}
+
+fn writeStringLiteralCodepoint(writer: *std.Io.Writer, codepoint: u21) !void {
+    if (codepoint >= 0xD800 and codepoint <= 0xDFFF) {
+        var buf: [3]u8 = undefined;
+        const len = try wtf8Encode(codepoint, &buf);
+        for (buf[0..len]) |byte| try writer.print("\\x{X:0>2}", .{byte});
+        return;
+    }
+
+    switch (codepoint) {
+        '\n' => return writer.writeAll("\\n"),
+        '\r' => return writer.writeAll("\\r"),
+        '\t' => return writer.writeAll("\\t"),
+        '"' => return writer.writeAll("\\\""),
+        '\\' => return writer.writeAll("\\\\"),
+        0x20...0x21, 0x23...0x5B, 0x5D...0x7E => return writer.writeByte(@intCast(codepoint)),
+        0...8, 11...12, 14...0x1F, 0x7F => return writer.print("\\x{X:0>2}", .{codepoint}),
+        else => {
+            var buf: [4]u8 = undefined;
+            const len = try wtf8Encode(codepoint, &buf);
+            try writer.writeAll(buf[0..len]);
+        },
+    }
+}
+
+fn semanticValuePath(
+    allocator: std.mem.Allocator,
+    prefix: []const u8,
+    group_name: []const u8,
+    value_name: []const u8,
+) ![]const u8 {
+    const group_dir = try semanticGroupDir(allocator, prefix, group_name);
+    defer allocator.free(group_dir);
+    const file_name = try pathName(allocator, value_name);
+    defer allocator.free(file_name);
+    return try std.fmt.allocPrint(allocator, "{s}/{s}.zig", .{ group_dir, file_name });
+}
+
+fn semanticGroupFilePath(allocator: std.mem.Allocator, prefix: []const u8, group_name: []const u8) ![]const u8 {
+    const group_dir = try semanticGroupDir(allocator, prefix, group_name);
+    defer allocator.free(group_dir);
+    return try std.fmt.allocPrint(allocator, "{s}.zig", .{group_dir});
+}
+
+fn createParentDirPath(dir: OutputDir, path: []const u8) !void {
+    const parent = std.fs.path.dirname(path) orelse return;
+    if (parent.len == 0) return;
+    try dir.dir.createDirPath(dir.io, parent);
+}
+
+fn relativeGroupImportPath(
+    allocator: std.mem.Allocator,
+    group_path: []const u8,
+    value_path: []const u8,
+) ![]const u8 {
+    const group_dir = std.fs.path.dirname(group_path) orelse "";
+    if (group_dir.len == 0) return try allocator.dupe(u8, value_path);
+
+    const prefix_len = group_dir.len + 1;
+    if (!std.mem.startsWith(u8, value_path, group_dir) or
+        value_path.len <= prefix_len or
+        value_path[group_dir.len] != '/')
+    {
+        return error.InvalidGeneratedPath;
+    }
+    return try allocator.dupe(u8, value_path[prefix_len..]);
+}
+
+fn declName(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
+    return pathName(allocator, name);
+}
+
+fn semanticGroupDir(allocator: std.mem.Allocator, prefix: []const u8, group_name: []const u8) ![]const u8 {
+    const suffix = semanticGroupSuffix(group_name);
+    if (suffix) |literal| {
+        return try std.fmt.allocPrint(allocator, "{s}/{s}", .{ prefix, literal });
+    }
+
+    const group_path = try pathName(allocator, group_name);
+    defer allocator.free(group_path);
+    return try std.fmt.allocPrint(allocator, "{s}/{s}", .{ prefix, group_path });
+}
+
+fn semanticGroupSuffix(group_name: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, group_name, "Blocks")) return "blocks";
+    if (std.mem.eql(u8, group_name, "CoreProperties")) return "props";
+    if (std.mem.eql(u8, group_name, "GeneralCategory")) return "gencat";
+    if (std.mem.eql(u8, group_name, "Scripts")) return "scripts";
+    if (std.mem.eql(u8, group_name, "ScriptsExtended")) return "scripts_ext";
+    if (std.mem.eql(u8, group_name, "GraphemeBreak")) return "aux-props/GraphemeBreak";
+    if (std.mem.eql(u8, group_name, "SentenceBreak")) return "aux-props/SentenceBreak";
+    if (std.mem.eql(u8, group_name, "WordBreak")) return "aux-props/WordBreak";
+    return null;
+}
+
+fn valueAliasProperty(group_name: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, group_name, "Blocks")) return "blk";
+    if (std.mem.eql(u8, group_name, "GeneralCategory")) return "gc";
+    if (std.mem.eql(u8, group_name, "GraphemeBreak")) return "GCB";
+    if (std.mem.eql(u8, group_name, "Scripts")) return "sc";
+    if (std.mem.eql(u8, group_name, "ScriptsExtended")) return "sc";
+    if (std.mem.eql(u8, group_name, "SentenceBreak")) return "SB";
+    if (std.mem.eql(u8, group_name, "WordBreak")) return "WB";
+    return null;
+}
+
+fn pathName(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
+    var result: std.ArrayList(u8) = .empty;
+    errdefer result.deinit(allocator);
+
+    var pending_sep = false;
+    for (name) |byte| {
+        switch (byte) {
+            'A'...'Z', 'a'...'z', '0'...'9' => {
+                if (pending_sep and result.items.len != 0 and result.items[result.items.len - 1] != '_') {
+                    try result.append(allocator, '_');
+                }
+                try result.append(allocator, byte);
+                pending_sep = false;
+            },
+            '_', ' ', '-' => {
+                pending_sep = result.items.len != 0;
+            },
+            else => {
+                if (result.items.len != 0 and result.items[result.items.len - 1] != '_') {
+                    try result.append(allocator, '_');
+                }
+                var buf: [2]u8 = undefined;
+                const hex = try std.fmt.bufPrint(&buf, "{X:0>2}", .{byte});
+                try result.appendSlice(allocator, hex);
+                pending_sep = true;
+            },
+        }
+    }
+
+    if (result.items.len == 0) try result.append(allocator, '_');
+    return try result.toOwnedSlice(allocator);
 }
 
 fn sortedGroupNames(allocator: std.mem.Allocator, db: *Db) ![][]const u8 {
@@ -180,6 +678,24 @@ fn sortedValueNames(allocator: std.mem.Allocator, group: anytype) ![][]const u8 
 fn ltString(_: void, left: []const u8, right: []const u8) bool {
     return std.mem.order(u8, left, right) == .lt;
 }
+
+fn isMappedGroup(name: []const u8) bool {
+    inline for (mapped_groups) |mapped_group| {
+        if (std.mem.eql(u8, name, mapped_group)) return true;
+    }
+    return false;
+}
+
+const mapped_groups = [_][]const u8{
+    "Blocks",
+    "CoreProperties",
+    "GeneralCategory",
+    "GraphemeBreak",
+    "Scripts",
+    "ScriptsExtended",
+    "SentenceBreak",
+    "WordBreak",
+};
 
 fn writeEscapedBytes(writer: *std.Io.Writer, bytes: []const u8) !void {
     for (bytes) |byte| {
@@ -214,26 +730,6 @@ const Identifier = struct {
     }
 };
 
-fn ownedIdentifier(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
-    if (isBareIdentifier(name)) return name;
-
-    var result: std.ArrayList(u8) = .empty;
-    errdefer result.deinit(allocator);
-    try result.appendSlice(allocator, "@\"");
-    for (name) |byte| switch (byte) {
-        '"' => try result.appendSlice(allocator, "\\\""),
-        '\\' => try result.appendSlice(allocator, "\\\\"),
-        0x20...0x21, 0x23...0x5b, 0x5d...0x7e => try result.append(allocator, byte),
-        else => {
-            var buf: [4]u8 = undefined;
-            const escaped = try std.fmt.bufPrint(&buf, "\\x{X:0>2}", .{byte});
-            try result.appendSlice(allocator, escaped);
-        },
-    };
-    try result.append(allocator, '"');
-    return try result.toOwnedSlice(allocator);
-}
-
 fn isBareIdentifier(name: []const u8) bool {
     if (name.len == 0) return false;
     if (!std.ascii.isAlphabetic(name[0]) and name[0] != '_') return false;
@@ -250,131 +746,6 @@ const header_txt =
     \\
 ;
 
-const codepoints_prelude =
-    \\const Range = struct { first: u21, last: u21 };
-    \\
-    \\fn rangeCodepointCount(comptime ranges: []const Range) comptime_int {
-    \\    var count: comptime_int = 0;
-    \\    for (ranges) |range| count += range.last - range.first + 1;
-    \\    return count;
-    \\}
-    \\
-    \\fn expandCodepoints(comptime ranges: []const Range) [rangeCodepointCount(ranges)]u21 {
-    \\    var result: [rangeCodepointCount(ranges)]u21 = undefined;
-    \\    var idx: usize = 0;
-    \\    for (ranges) |range| {
-    \\        var codepoint = range.first;
-    \\        while (codepoint <= range.last) : (codepoint += 1) {
-    \\            result[idx] = codepoint;
-    \\            idx += 1;
-    \\        }
-    \\    }
-    \\    return result;
-    \\}
-    \\
-    \\
-;
-
-const strs_prelude =
-    \\const Range = struct { first: u21, last: u21 };
-    \\
-    \\fn rangeWtf8Len(comptime ranges: []const Range) comptime_int {
-    \\    var len: comptime_int = 0;
-    \\    for (ranges) |range| {
-    \\        var codepoint = range.first;
-    \\        while (codepoint <= range.last) : (codepoint += 1) {
-    \\            len += wtf8Len(codepoint);
-    \\        }
-    \\    }
-    \\    return len;
-    \\}
-    \\
-    \\fn wtf8Len(comptime codepoint: u21) comptime_int {
-    \\    if (codepoint <= 0x7F) return 1;
-    \\    if (codepoint <= 0x7FF) return 2;
-    \\    if (codepoint <= 0xFFFF) return 3;
-    \\    return 4;
-    \\}
-    \\
-    \\fn expandWtf8(comptime ranges: []const Range) [rangeWtf8Len(ranges)]u8 {
-    \\    var result: [rangeWtf8Len(ranges)]u8 = undefined;
-    \\    var idx: usize = 0;
-    \\    for (ranges) |range| {
-    \\        var codepoint = range.first;
-    \\        while (codepoint <= range.last) : (codepoint += 1) {
-    \\            idx += writeWtf8(codepoint, result[idx..]);
-    \\        }
-    \\    }
-    \\    return result;
-    \\}
-    \\
-    \\fn writeWtf8(comptime codepoint: u21, dest: []u8) usize {
-    \\    if (codepoint <= 0x7F) {
-    \\        dest[0] = @intCast(codepoint);
-    \\        return 1;
-    \\    }
-    \\    if (codepoint <= 0x7FF) {
-    \\        dest[0] = 0xC0 | @as(u8, @intCast(codepoint >> 6));
-    \\        dest[1] = 0x80 | @as(u8, @intCast(codepoint & 0x3F));
-    \\        return 2;
-    \\    }
-    \\    if (codepoint <= 0xFFFF) {
-    \\        dest[0] = 0xE0 | @as(u8, @intCast(codepoint >> 12));
-    \\        dest[1] = 0x80 | @as(u8, @intCast((codepoint >> 6) & 0x3F));
-    \\        dest[2] = 0x80 | @as(u8, @intCast(codepoint & 0x3F));
-    \\        return 3;
-    \\    }
-    \\    dest[0] = 0xF0 | @as(u8, @intCast(codepoint >> 18));
-    \\    dest[1] = 0x80 | @as(u8, @intCast((codepoint >> 12) & 0x3F));
-    \\    dest[2] = 0x80 | @as(u8, @intCast((codepoint >> 6) & 0x3F));
-    \\    dest[3] = 0x80 | @as(u8, @intCast(codepoint & 0x3F));
-    \\    return 4;
-    \\}
-    \\
-    \\
-;
-
-const LocalRuneSet = struct {
-    body: []const u64,
-
-    fn deinit(set: LocalRuneSet, allocator: std.mem.Allocator) void {
-        allocator.free(set.body);
-    }
-
-    fn createFromConstString(str: []const u8, allocator: std.mem.Allocator) !LocalRuneSet {
-        const mutable = try allocator.dupe(u8, str);
-        defer allocator.free(mutable);
-        return .{ .body = try createBodyFromString(mutable, allocator) };
-    }
-
-    fn createFromRanges(ranges: []const Range, allocator: std.mem.Allocator) !LocalRuneSet {
-        var bytes: std.ArrayList(u8) = .empty;
-        defer bytes.deinit(allocator);
-
-        for (ranges) |range| {
-            var codepoint = range.first;
-            while (codepoint <= range.last) : (codepoint += 1) {
-                var buf: [4]u8 = undefined;
-                const len = try wtf8Encode(codepoint, &buf);
-                try bytes.appendSlice(allocator, buf[0..len]);
-            }
-        }
-
-        return createFromConstString(bytes.items, allocator);
-    }
-
-    fn serialize(set: LocalRuneSet, writer: *std.Io.Writer, public: Privacy, name: []const u8) !void {
-        if (public == .public) try writer.writeAll("pub ");
-        try writer.print("const {s} = RuneSet{{ .body = &.{{ 0x{x}", .{ name, set.body[0] });
-        for (set.body[1..]) |word| {
-            try writer.print(", 0x{x}", .{word});
-        }
-        try writer.writeAll(" } };\n");
-    }
-
-    const Privacy = enum { private, public };
-};
-
 fn wtf8Encode(codepoint: u21, buf: []u8) !usize {
     if (codepoint >= 0xD800 and codepoint <= 0xDFFF) {
         if (buf.len < 3) return error.NoSpaceLeft;
@@ -390,265 +761,6 @@ fn wtf8Encode(codepoint: u21, buf: []u8) !usize {
     return @intCast(len);
 }
 
-const LOW = 0;
-const HI = 1;
-const LEAD = 2;
-const T4_OFF = 3;
-const TWO_MAX = 32;
-const THREE_MAX = 48;
-const FOUR_MAX = 56;
-
-const InvalidUnicode = error.InvalidUnicode;
-
-const RuneKind = enum(u2) {
-    low,
-    hi,
-    follow,
-    lead,
-};
-
-const CodeUnit = packed struct(u8) {
-    body: u6,
-    kind: RuneKind,
-
-    fn inMask(cu: CodeUnit) u64 {
-        return @as(u64, 1) << cu.body;
-    }
-
-    fn nMultiBytes(cu: CodeUnit) ?u8 {
-        std.debug.assert(cu.kind == .lead);
-        return switch (cu.body) {
-            0...31 => 2,
-            32...47 => 3,
-            48...55 => 4,
-            56...63 => null,
-        };
-    }
-
-    fn hiMask(cu: CodeUnit) u64 {
-        return (@as(u64, 1) << cu.body) - 1;
-    }
-
-    fn lowMask(cu: CodeUnit) u64 {
-        return if (cu.body == 63) 0 else ~((@as(u64, 1) << (cu.body + 1)) - 1);
-    }
-};
-
-const Mask = struct {
-    m: u64,
-
-    fn add(mask: *Mask, cu: CodeUnit) void {
-        mask.m |= cu.inMask();
-    }
-
-    fn isIn(mask: Mask, cu: CodeUnit) bool {
-        return mask.m | cu.inMask() == mask.m;
-    }
-
-    fn higherThan(mask: Mask, cu: CodeUnit) ?u64 {
-        if (!mask.isIn(cu)) return null;
-        return @popCount(mask.m & cu.lowMask());
-    }
-
-    fn lowerThan(mask: Mask, cu: CodeUnit) ?u64 {
-        if (!mask.isIn(cu)) return null;
-        return @popCount(mask.m & cu.hiMask());
-    }
-
-    fn count(mask: Mask) usize {
-        return @popCount(mask.m);
-    }
-};
-
-fn codeunit(byte: u8) CodeUnit {
-    return @bitCast(byte);
-}
-
-fn toMask(word: u64) Mask {
-    return .{ .m = word };
-}
-
-fn createBodyFromString(str: []u8, allocator: std.mem.Allocator) ![]u64 {
-    var header: [4]u64 = .{0} ** 4;
-    var back: usize = 0;
-    var sieve = str;
-
-    var idx: usize = 0;
-    var low = toMask(0);
-    var hi = toMask(0);
-    var lead = toMask(0);
-    while (idx < sieve.len) {
-        const cu = codeunit(sieve[idx]);
-        switch (cu.kind) {
-            .low => {
-                low.add(cu);
-                back += 1;
-                idx += 1;
-            },
-            .hi => {
-                hi.add(cu);
-                back += 1;
-                idx += 1;
-            },
-            .lead => {
-                lead.add(cu);
-                const byte_count = cu.nMultiBytes() orelse return InvalidUnicode;
-                if (idx + byte_count > sieve.len) return InvalidUnicode;
-                if (byte_count >= 2) {
-                    sieve[idx - back] = sieve[idx];
-                    sieve[idx - back + 1] = sieve[idx + 1];
-                }
-                if (byte_count >= 3) sieve[idx - back + 2] = sieve[idx + 2];
-                if (byte_count == 4) sieve[idx - back + 3] = sieve[idx + 3];
-                idx += byte_count;
-            },
-            .follow => return InvalidUnicode,
-        }
-    }
-
-    header[LOW] = low.m;
-    header[HI] = hi.m;
-    if (lead.count() == 0) {
-        const body = try allocator.alloc(u64, 4);
-        @memcpy(body, &header);
-        return body;
-    }
-
-    sieve = sieve[0 .. sieve.len - back];
-    var t2: [FOUR_MAX + 1]u64 = .{0} ** (FOUR_MAX + 1);
-    idx = 0;
-    back = 0;
-    while (idx < sieve.len) {
-        const one = codeunit(sieve[idx]);
-        const byte_count = one.nMultiBytes() orelse return InvalidUnicode;
-        if (idx + byte_count > sieve.len) return InvalidUnicode;
-        const two = codeunit(sieve[idx + 1]);
-        if (two.kind != .follow) return InvalidUnicode;
-        var two_mask = toMask(t2[one.body]);
-        two_mask.add(two);
-        t2[one.body] = two_mask.m;
-        if (byte_count == 2) {
-            back += 2;
-        } else {
-            sieve[idx - back] = sieve[idx];
-            sieve[idx - back + 1] = sieve[idx + 1];
-            sieve[idx - back + 2] = sieve[idx + 2];
-            if (byte_count == 4) sieve[idx - back + 3] = sieve[idx + 3];
-        }
-        idx += byte_count;
-    }
-
-    header[LEAD] = lead.m;
-    if (sieve.len == back) {
-        const t2_compact = compactSlice(&t2);
-        const body = try allocator.alloc(u64, 4 + t2_compact.len);
-        @memcpy(body[0..4], &header);
-        @memcpy(body[4..], t2_compact);
-        return body;
-    }
-
-    sieve = sieve[0 .. sieve.len - back];
-    const t3 = try allocator.alloc(u64, popCountSlice(t2[TWO_MAX..]));
-    defer allocator.free(t3);
-    @memset(t3, 0);
-
-    idx = 0;
-    back = 0;
-    while (idx < sieve.len) {
-        const one = codeunit(sieve[idx]);
-        const byte_count = one.nMultiBytes().?;
-        const two = codeunit(sieve[idx + 1]);
-        const two_mask = toMask(t2[one.body]);
-        const three_off = two_mask.higherThan(two).? + popCountSlice(t2[one.body + 1 ..]);
-        const three = codeunit(sieve[idx + 2]);
-        if (three.kind != .follow) return InvalidUnicode;
-        var three_mask = toMask(t3[three_off]);
-        three_mask.add(three);
-        t3[three_off] = three_mask.m;
-        if (byte_count == 3) {
-            back += 3;
-        } else {
-            sieve[idx - back] = sieve[idx];
-            sieve[idx - back + 1] = sieve[idx + 1];
-            sieve[idx - back + 2] = sieve[idx + 2];
-            sieve[idx - back + 3] = sieve[idx + 3];
-        }
-        idx += byte_count;
-    }
-
-    if (sieve.len == back) {
-        const t2_compact = compactSlice(&t2);
-        const t3_off = 4 + t2_compact.len;
-        const body = try allocator.alloc(u64, t3_off + t3.len);
-        @memcpy(body[0..4], &header);
-        @memcpy(body[4..t3_off], t2_compact);
-        @memcpy(body[t3_off..], t3);
-        return body;
-    }
-
-    sieve = sieve[0 .. sieve.len - back];
-    const t4_head = 4 + nonZeroCount(&t2) + popCountSlice(t2[TWO_MAX..]);
-    header[T4_OFF] = t4_head;
-
-    const elem4 = popCountSlice(t2[THREE_MAX..]);
-    const t4 = try allocator.alloc(u64, popCountSlice(t3[0..elem4]));
-    defer allocator.free(t4);
-    @memset(t4, 0);
-
-    idx = 0;
-    while (idx < sieve.len) {
-        const one = codeunit(sieve[idx]);
-        const byte_count = one.nMultiBytes().?;
-        const two = codeunit(sieve[idx + 1]);
-        const two_mask = toMask(t2[one.body]);
-        const three_off = two_mask.higherThan(two).? + popCountSlice(t2[one.body + 1 ..]);
-        const three = codeunit(sieve[idx + 2]);
-        const three_mask = toMask(t3[three_off]);
-        const four_off = three_mask.lowerThan(three).? + popCountSlice(t3[0..three_off]);
-        if (idx + 3 >= sieve.len) return InvalidUnicode;
-        const four = codeunit(sieve[idx + 3]);
-        if (four.kind != .follow) return InvalidUnicode;
-        var four_mask = toMask(t4[four_off]);
-        four_mask.add(four);
-        t4[four_off] = four_mask.m;
-        idx += byte_count;
-    }
-
-    const t2_compact = compactSlice(&t2);
-    const t3_off = 4 + t2_compact.len;
-    const t4_off = header[T4_OFF];
-    const body = try allocator.alloc(u64, t4_off + t4.len);
-    @memcpy(body[0..4], &header);
-    @memcpy(body[4..t3_off], t2_compact);
-    @memcpy(body[t3_off..t4_off], t3);
-    @memcpy(body[t4_off..], t4);
-    return body;
-}
-
-fn compactSlice(slice: []u64) []u64 {
-    var write: usize = 0;
-    for (slice) |word| {
-        if (word == 0) continue;
-        slice[write] = word;
-        write += 1;
-    }
-    return slice[0..write];
-}
-
-fn nonZeroCount(words: []const u64) usize {
-    var count: usize = 0;
-    for (words) |word| {
-        if (word != 0) count += 1;
-    }
-    return count;
-}
-
-fn popCountSlice(words: []const u64) usize {
-    var count: usize = 0;
-    for (words) |word| count += @popCount(word);
-    return count;
-}
-
 test "emitRoots writes generated property roots" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -657,39 +769,100 @@ test "emitRoots writes generated property roots" {
     defer db.deinit();
 
     try db.addRange("GeneralCategory", "Lu", .{ .first = 0x41, .last = 0x42 });
+    try db.addRange("Age", "V1_1", .{ .first = 0x41, .last = 0x41 });
 
-    try emitRoots(testing.allocator, .{ .io = testing.io, .dir = tmp.dir }, &db);
+    var aliases = Aliases.init(testing.allocator);
+    defer aliases.deinit();
+    try aliases.loadPropertyLine("gc ; General_Category");
+    try aliases.loadPropertyValueLine("gc ; Lu ; Uppercase_Letter");
+    try aliases.loadPropertyLine("blk ; Block");
+    try aliases.loadPropertyValueLine("blk ; ASCII ; Basic_Latin");
 
-    inline for (.{ "sets.zig", "codepoints.zig", "strs.zig", "enums.zig", "maps.zig" }) |path| {
+    try emitRoots(testing.allocator, .{ .io = testing.io, .dir = tmp.dir }, &db, &aliases);
+
+    inline for (.{ "runicode.zig", "sets.zig", "codepoints.zig", "strs.zig", "enums.zig", "maps.zig" }) |path| {
         var file = try tmp.dir.openFile(testing.io, path, .{});
         file.close(testing.io);
     }
 
+    const runicode = try tmp.dir.readFileAlloc(testing.io, "runicode.zig", testing.allocator, .limited(4096));
+    defer testing.allocator.free(runicode);
     const strs = try tmp.dir.readFileAlloc(testing.io, "strs.zig", testing.allocator, .limited(4096));
     defer testing.allocator.free(strs);
 
+    try testing.expect(std.mem.indexOf(u8, runicode, "pub const sets = @import(\"sets.zig\");") != null);
+    try testing.expect(std.mem.indexOf(u8, runicode, "pub const maps = @import(\"maps.zig\");") != null);
     try testing.expect(std.mem.indexOf(u8, strs, "pub const GeneralCategory") != null);
     try testing.expect(std.mem.indexOf(u8, strs, "pub const Lu") != null);
+
+    const gencat = try tmp.dir.readFileAlloc(testing.io, "strs/gencat.zig", testing.allocator, .limited(16 * 1024));
+    defer testing.allocator.free(gencat);
+
+    try testing.expect(std.mem.indexOf(u8, gencat, "pub const Lu = @import(\"gencat/Lu.zig\").Lu;") != null);
+    try testing.expect(std.mem.indexOf(u8, gencat, "pub const Uppercase_Letter = Lu;") != null);
+
+    const maps = try tmp.dir.readFileAlloc(testing.io, "maps.zig", testing.allocator, .limited(4096));
+    defer testing.allocator.free(maps);
+
+    try testing.expect(std.mem.indexOf(u8, maps, "pub const GeneralCategory = @import(\"maps/gencat.zig\");") != null);
+    try testing.expect(std.mem.indexOf(u8, maps, "pub const Age") == null);
+
+    const gencat_maps = try tmp.dir.readFileAlloc(testing.io, "maps/gencat.zig", testing.allocator, .limited(4096));
+    defer testing.allocator.free(gencat_maps);
+
+    try testing.expect(std.mem.indexOf(u8, gencat_maps, "const sets = @import(\"../sets/gencat.zig\");") != null);
+    try testing.expect(std.mem.indexOf(u8, gencat_maps, "const codepoints = @import(\"../codepoints/gencat.zig\");") != null);
+    try testing.expect(std.mem.indexOf(u8, gencat_maps, "const strs = @import(\"../strs/gencat.zig\");") != null);
+    try testing.expect(std.mem.indexOf(u8, gencat_maps, "const enums = @import(\"../enums.zig\");") != null);
+    try testing.expect(std.mem.indexOf(u8, gencat_maps, "pub const Sets = ucd_tools.NamedMap(sets);") != null);
+    try testing.expect(std.mem.indexOf(u8, gencat_maps, "pub const Codepoints = ucd_tools.NamedMap(codepoints);") != null);
+    try testing.expect(std.mem.indexOf(u8, gencat_maps, "pub const Strs = ucd_tools.NamedMap(strs);") != null);
 }
 
-test "emitRoots writes compact range expansion for large roots" {
+test "emitRoots writes literal generated leaves" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
     var db = Db.init(testing.allocator);
     defer db.deinit();
 
-    try db.addRange("Blocks", "No_Block", .{ .first = 0x0, .last = 0x10FFFF });
+    try db.addRange("Blocks", "Basic_Latin", .{ .first = 0x2D, .last = 0x2F });
+    try db.addRange("Blocks", "Basic_Latin", .{ .first = 0x2E, .last = 0x2E });
 
-    try emitRoots(testing.allocator, .{ .io = testing.io, .dir = tmp.dir }, &db);
+    var aliases = Aliases.init(testing.allocator);
+    defer aliases.deinit();
+    try aliases.loadPropertyLine("blk ; Block");
+    try aliases.loadPropertyValueLine("blk ; ASCII ; Basic_Latin");
 
-    const codepoints = try tmp.dir.readFileAlloc(testing.io, "codepoints.zig", testing.allocator, .limited(16 * 1024));
-    defer testing.allocator.free(codepoints);
-    const strs = try tmp.dir.readFileAlloc(testing.io, "strs.zig", testing.allocator, .limited(16 * 1024));
-    defer testing.allocator.free(strs);
+    try emitRoots(testing.allocator, .{ .io = testing.io, .dir = tmp.dir }, &db, &aliases);
 
-    try testing.expect(std.mem.indexOf(u8, codepoints, "expandCodepoints") != null);
-    try testing.expect(std.mem.indexOf(u8, codepoints, "0x10FFFF") != null);
-    try testing.expect(std.mem.indexOf(u8, strs, "expandWtf8") != null);
-    try testing.expect(std.mem.indexOf(u8, strs, "0x10FFFF") != null);
+    const codepoints_root = try tmp.dir.readFileAlloc(testing.io, "codepoints.zig", testing.allocator, .limited(16 * 1024));
+    defer testing.allocator.free(codepoints_root);
+    const strs_root = try tmp.dir.readFileAlloc(testing.io, "strs.zig", testing.allocator, .limited(16 * 1024));
+    defer testing.allocator.free(strs_root);
+    const sets_root = try tmp.dir.readFileAlloc(testing.io, "sets.zig", testing.allocator, .limited(16 * 1024));
+    defer testing.allocator.free(sets_root);
+    const codepoints_group = try tmp.dir.readFileAlloc(testing.io, "codepoints/blocks.zig", testing.allocator, .limited(16 * 1024));
+    defer testing.allocator.free(codepoints_group);
+    const codepoints_value = try tmp.dir.readFileAlloc(testing.io, "codepoints/blocks/Basic_Latin.zig", testing.allocator, .limited(16 * 1024));
+    defer testing.allocator.free(codepoints_value);
+    const strs_value = try tmp.dir.readFileAlloc(testing.io, "strs/blocks/Basic_Latin.zig", testing.allocator, .limited(16 * 1024));
+    defer testing.allocator.free(strs_value);
+    const sets_value = try tmp.dir.readFileAlloc(testing.io, "sets/blocks/Basic_Latin.zig", testing.allocator, .limited(512 * 1024));
+    defer testing.allocator.free(sets_value);
+    const maps_group = try tmp.dir.readFileAlloc(testing.io, "maps/blocks.zig", testing.allocator, .limited(16 * 1024));
+    defer testing.allocator.free(maps_group);
+
+    try testing.expect(std.mem.indexOf(u8, codepoints_root, "pub const Blocks = @import(\"codepoints/blocks.zig\");") != null);
+    try testing.expect(std.mem.indexOf(u8, strs_root, "pub const Blocks = @import(\"strs/blocks.zig\");") != null);
+    try testing.expect(std.mem.indexOf(u8, sets_root, "pub const Blocks = @import(\"sets/blocks.zig\");") != null);
+    try testing.expect(std.mem.indexOf(u8, codepoints_group, "@import(\"blocks/Basic_Latin.zig\").Basic_Latin") != null);
+    try testing.expect(std.mem.indexOf(u8, codepoints_group, "pub const ASCII = Basic_Latin;") != null);
+    try testing.expect(std.mem.indexOf(u8, codepoints_value, "pub const Basic_Latin: [3]u21 = .{ 0x2D, 0x2E, 0x2F, };") != null);
+    try testing.expect(std.mem.indexOf(u8, strs_value, "pub const Basic_Latin = \"-./\";") != null);
+    try testing.expect(std.mem.indexOf(u8, sets_value, "RuneSet") != null);
+    try testing.expect(std.mem.indexOf(u8, sets_value, "/// Length: ") != null);
+    try testing.expect(std.mem.indexOf(u8, sets_value, "pub const Basic_Latin") != null);
+    try testing.expect(std.mem.indexOf(u8, maps_group, "const sets = @import(\"../sets/blocks.zig\");") != null);
+    try testing.expect(std.mem.indexOf(u8, maps_group, "pub const Codepoints = ucd_tools.NamedMap(codepoints);") != null);
 }

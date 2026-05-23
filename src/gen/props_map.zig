@@ -39,14 +39,13 @@ pub fn NamedMap(comptime Source: type) type {
             pair.* = .{ final_key_bufs[idx][0..final_key_lens[idx]], final_values[idx] };
         }
 
-        const map = std.StaticStringMap(Value).initComptime(pairs);
+        const static_map = std.StaticStringMap(Value).initComptime(pairs);
         return struct {
-            map: std.StaticStringMap(Value) = map,
             buf: [128]u8 = undefined,
 
             pub fn get(props: *@This(), name: []const u8) ?Value {
                 const len = normalizePropName(name, &props.buf) orelse return null;
-                return props.map.get(props.buf[0..len]);
+                return static_map.get(props.buf[0..len]);
             }
         };
     }

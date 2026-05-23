@@ -1,33 +1,28 @@
 const std = @import("std");
 const audit = @import("ucd/audit.zig");
 const alias_data = @import("ucd/aliases.zig");
-const Db = @import("ucd/db.zig").Db;
+const db_data = @import("ucd/db.zig");
 const emit = @import("ucd/emit.zig");
 const manifest = @import("ucd/manifest.zig");
 const parse = @import("ucd/parse.zig");
 const testing = std.testing;
 
 const Aliases = alias_data.Aliases;
-
-const PropertyRange = struct {
-    property: []const u8,
-    range: parse.Range,
-};
-
-const MissingAssignment = struct {
-    property: []const u8,
-    value: []const u8,
-    range: parse.Range,
-};
+const Db = db_data.Db;
+const PropertyGroup = db_data.PropertyGroup;
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const allocator = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(allocator);
-    if (argv.len != 7) return error.InvalidArguments;
+    if (argv.len != 3) return error.InvalidArguments;
 
     var ucd_dir = try std.Io.Dir.cwd().openDir(io, argv[1], .{ .iterate = true });
     defer ucd_dir.close(io);
+    try std.Io.Dir.cwd().deleteTree(io, argv[2]);
+    try std.Io.Dir.cwd().createDirPath(io, argv[2]);
+    var out_dir = try std.Io.Dir.cwd().openDir(io, argv[2], .{});
+    defer out_dir.close(io);
 
     try audit.auditDir(io, allocator, ucd_dir);
     var aliases = alias_data.Aliases.init(allocator);
@@ -45,16 +40,16 @@ pub fn main(init: std.process.Init) !void {
             else => {},
         }
     }
-
+    for (manifest.known_files) |entry| {
+        switch (entry.kind) {
+            .script_extensions => try readScriptExtensionsFile(io, allocator, ucd_dir, &db, &aliases, entry),
+            else => {},
+        }
+    }
     try emit.emitRoots(allocator, .{
         .io = io,
-        .dir = std.Io.Dir.cwd(),
-        .sets_path = argv[2],
-        .codepoints_path = argv[3],
-        .strs_path = argv[4],
-        .enums_path = argv[5],
-        .maps_path = argv[6],
-    }, &db);
+        .dir = out_dir,
+    }, &db, &aliases);
 
     var stdout_buf: [128]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
@@ -75,19 +70,10 @@ fn readCodepointPropertyFile(
     var file = try ucd_dir.openFile(io, entry.path, .{});
     defer file.close(io);
 
-    var explicit_ranges: std.ArrayList(PropertyRange) = .empty;
-    defer explicit_ranges.deinit(allocator);
-    defer freePropertyRanges(allocator, explicit_ranges.items);
-
-    var missing_assignments: std.ArrayList(MissingAssignment) = .empty;
-    defer missing_assignments.deinit(allocator);
-    defer freeMissingAssignments(allocator, missing_assignments.items);
-
     var in_buf: [4096]u8 = undefined;
     var in_reader = file.reader(io, &in_buf);
     while (try in_reader.interface.takeDelimiter('\n')) |line| {
-        const is_missing = isMissingLine(line);
-        var field_list = try codepointPropertyFields(allocator, line);
+        var field_list = try parse.fields(allocator, line);
         defer field_list.deinit(allocator);
 
         if (field_list.items.len == 0) continue;
@@ -105,129 +91,53 @@ fn readCodepointPropertyFile(
             canonical_property;
         const value = aliases.canonicalValue(canonical_property, raw_value) orelse raw_value;
 
-        if (is_missing) {
-            try appendMissingAssignment(allocator, &missing_assignments, property, value, range);
-        } else {
-            try db.addRange(property, value, range);
-            try appendPropertyRange(allocator, &explicit_ranges, property, range);
-        }
-    }
-
-    try applyMissingAssignments(allocator, db, explicit_ranges.items, missing_assignments.items);
-}
-
-fn codepointPropertyFields(allocator: std.mem.Allocator, line: []const u8) !parse.FieldList {
-    const trimmed = std.mem.trim(u8, line, " \t\r\n");
-    const missing_prefix = "# @missing:";
-    if (!std.mem.startsWith(u8, trimmed, missing_prefix)) {
-        return parse.fields(allocator, line);
-    }
-    return parse.fields(allocator, trimmed[missing_prefix.len..]);
-}
-
-fn isMissingLine(line: []const u8) bool {
-    return std.mem.startsWith(u8, std.mem.trim(u8, line, " \t\r\n"), "# @missing:");
-}
-
-fn appendPropertyRange(
-    allocator: std.mem.Allocator,
-    ranges: *std.ArrayList(PropertyRange),
-    property: []const u8,
-    range: parse.Range,
-) !void {
-    const owned_property = try allocator.dupe(u8, property);
-    errdefer allocator.free(owned_property);
-    try ranges.append(allocator, .{ .property = owned_property, .range = range });
-}
-
-fn appendMissingAssignment(
-    allocator: std.mem.Allocator,
-    assignments: *std.ArrayList(MissingAssignment),
-    property: []const u8,
-    value: []const u8,
-    range: parse.Range,
-) !void {
-    const owned_property = try allocator.dupe(u8, property);
-    errdefer allocator.free(owned_property);
-    const owned_value = try allocator.dupe(u8, value);
-    errdefer allocator.free(owned_value);
-    try assignments.append(allocator, .{
-        .property = owned_property,
-        .value = owned_value,
-        .range = range,
-    });
-}
-
-fn freePropertyRanges(allocator: std.mem.Allocator, ranges: []PropertyRange) void {
-    for (ranges) |range| allocator.free(range.property);
-}
-
-fn freeMissingAssignments(allocator: std.mem.Allocator, assignments: []MissingAssignment) void {
-    for (assignments) |assignment| {
-        allocator.free(assignment.property);
-        allocator.free(assignment.value);
+        try db.addRange(property, value, range);
     }
 }
 
-fn applyMissingAssignments(
+fn readScriptExtensionsFile(
+    io: std.Io,
     allocator: std.mem.Allocator,
+    ucd_dir: std.Io.Dir,
     db: *Db,
-    explicit_ranges: []const PropertyRange,
-    missing_assignments: []const MissingAssignment,
+    aliases: *Aliases,
+    entry: manifest.UcdFile,
 ) !void {
-    for (missing_assignments, 0..) |assignment, assignment_index| {
-        var pieces: std.ArrayList(parse.Range) = .empty;
-        defer pieces.deinit(allocator);
-        try pieces.append(allocator, assignment.range);
+    const namespace = entry.namespace orelse return error.InvalidScriptExtensionsEntry;
+    const scripts = db.property("Scripts") orelse return error.MissingScripts;
+    try copyGroupRanges(db, namespace, scripts);
 
-        for (explicit_ranges) |explicit| {
-            if (!std.mem.eql(u8, assignment.property, explicit.property)) continue;
-            try subtractRange(allocator, &pieces, explicit.range);
-        }
+    var file = try ucd_dir.openFile(io, entry.path, .{});
+    defer file.close(io);
 
-        for (missing_assignments[assignment_index + 1 ..]) |later| {
-            if (!std.mem.eql(u8, assignment.property, later.property)) continue;
-            try subtractRange(allocator, &pieces, later.range);
-        }
+    var in_buf: [4096]u8 = undefined;
+    var in_reader = file.reader(io, &in_buf);
+    while (try in_reader.interface.takeDelimiter('\n')) |line| {
+        var field_list = try parse.fields(allocator, line);
+        defer field_list.deinit(allocator);
 
-        for (pieces.items) |range| {
-            try db.addRange(assignment.property, assignment.value, range);
+        if (field_list.items.len == 0) continue;
+        if (field_list.items.len != 2) return error.InvalidScriptExtensionsLine;
+
+        const range = try parse.parseCodepointRange(field_list.items[0]);
+        var script_it = std.mem.tokenizeAny(u8, field_list.items[1], " \t");
+        while (script_it.next()) |raw_script| {
+            const script = aliases.canonicalValue("sc", raw_script) orelse raw_script;
+            try db.addRange(namespace, script, range);
         }
     }
 }
 
-fn subtractRange(
-    allocator: std.mem.Allocator,
-    pieces: *std.ArrayList(parse.Range),
-    covered: parse.Range,
-) !void {
-    var remaining: std.ArrayList(parse.Range) = .empty;
-    errdefer remaining.deinit(allocator);
-
-    for (pieces.items) |piece| {
-        if (covered.first > piece.last or covered.last < piece.first) {
-            try remaining.append(allocator, piece);
-            continue;
-        }
-        if (covered.first > piece.first) {
-            try remaining.append(allocator, .{
-                .first = piece.first,
-                .last = covered.first - 1,
-            });
-        }
-        if (covered.last < piece.last) {
-            try remaining.append(allocator, .{
-                .first = covered.last + 1,
-                .last = piece.last,
-            });
+fn copyGroupRanges(db: *Db, dest_name: []const u8, source: *const PropertyGroup) !void {
+    var it = source.values.iterator();
+    while (it.next()) |entry| {
+        for (entry.value_ptr.ranges.items) |range| {
+            try db.addRange(dest_name, entry.key_ptr.*, range);
         }
     }
-
-    pieces.deinit(allocator);
-    pieces.* = remaining;
 }
 
-test "codepoint property reader applies missing defaults" {
+test "codepoint property reader ignores comment defaults" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(testing.io, .{
@@ -256,13 +166,12 @@ test "codepoint property reader applies missing defaults" {
     });
 
     const block = db.property("Blocks").?;
-    const missing = block.value("No_Block").?;
-    try testing.expectEqualSlices(u21, &.{ 0x0, 0x2 }, missing.codepoints.items);
+    try testing.expect(block.value("No_Block") == null);
     const basic_latin = block.value("Basic Latin").?;
     try testing.expectEqualSlices(u21, &.{0x1}, basic_latin.codepoints.items);
 }
 
-test "codepoint property reader gives later missing defaults precedence" {
+test "codepoint property reader ignores comment-only files" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(testing.io, .{
@@ -290,9 +199,38 @@ test "codepoint property reader gives later missing defaults precedence" {
         .namespace = "BidiClass",
     });
 
-    const bidi = db.property("BidiClass").?;
-    try testing.expectEqualSlices(u21, &.{0x0}, bidi.value("Left_To_Right").?.codepoints.items);
-    try testing.expectEqualSlices(u21, &.{ 0x1, 0x2 }, bidi.value("Right_To_Left").?.codepoints.items);
+    try testing.expect(db.property("BidiClass") == null);
+}
+
+test "codepoint property reader ignores malformed missing comments" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{
+        .sub_path = "Blocks.txt",
+        .data =
+        \\# @missing: not-a-range; No_Block
+        \\0001; Basic Latin
+        \\
+        ,
+    });
+
+    var aliases = Aliases.init(testing.allocator);
+    defer aliases.deinit();
+    try aliases.loadPropertyLine("blk ; Block");
+    try aliases.loadPropertyValueLine("blk ; Basic_Latin ; Basic Latin");
+
+    var db = Db.init(testing.allocator);
+    defer db.deinit();
+
+    try readCodepointPropertyFile(testing.io, testing.allocator, tmp.dir, &db, &aliases, .{
+        .path = "Blocks.txt",
+        .kind = .codepoint_property,
+        .property = "blk",
+        .namespace = "Blocks",
+    });
+
+    const block = db.property("Blocks").?;
+    try testing.expectEqualSlices(u21, &.{0x1}, block.value("Basic Latin").?.codepoints.items);
 }
 
 test "codepoint property reader keeps grouped binary properties separate" {
@@ -323,4 +261,55 @@ test "codepoint property reader keeps grouped binary properties separate" {
     try testing.expectEqualSlices(u21, &.{0x09}, properties.value("White_Space").?.codepoints.items);
     try testing.expectEqualSlices(u21, &.{0x41}, properties.value("Alphabetic").?.codepoints.items);
     try testing.expect(properties.value("Y") == null);
+}
+
+test "script extensions inherit scripts and add explicit script values" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{
+        .sub_path = "Scripts.txt",
+        .data =
+        \\0000..0002; Latn
+        \\0003; Grek
+        \\
+        ,
+    });
+    try tmp.dir.writeFile(testing.io, .{
+        .sub_path = "ScriptExtensions.txt",
+        .data =
+        \\0001; Grek
+        \\0002; Cyrl Latn
+        \\# @missing: 0000..10FFFF; <script>
+        \\
+        ,
+    });
+
+    var aliases = Aliases.init(testing.allocator);
+    defer aliases.deinit();
+    try aliases.loadPropertyLine("sc ; Script");
+    try aliases.loadPropertyLine("scx ; Script_Extensions");
+    try aliases.loadPropertyValueLine("sc ; Latn ; Latin");
+    try aliases.loadPropertyValueLine("sc ; Grek ; Greek");
+    try aliases.loadPropertyValueLine("sc ; Cyrl ; Cyrillic");
+
+    var db = Db.init(testing.allocator);
+    defer db.deinit();
+
+    try readCodepointPropertyFile(testing.io, testing.allocator, tmp.dir, &db, &aliases, .{
+        .path = "Scripts.txt",
+        .kind = .codepoint_property,
+        .property = "sc",
+        .namespace = "Scripts",
+    });
+    try readScriptExtensionsFile(testing.io, testing.allocator, tmp.dir, &db, &aliases, .{
+        .path = "ScriptExtensions.txt",
+        .kind = .script_extensions,
+        .property = "scx",
+        .namespace = "ScriptsExtended",
+    });
+
+    const scripts_extended = db.property("ScriptsExtended").?;
+    try testing.expectEqualSlices(u21, &.{ 0x0, 0x1, 0x2, 0x2 }, scripts_extended.value("Latin").?.codepoints.items);
+    try testing.expectEqualSlices(u21, &.{ 0x3, 0x1 }, scripts_extended.value("Greek").?.codepoints.items);
+    try testing.expectEqualSlices(u21, &.{0x2}, scripts_extended.value("Cyrillic").?.codepoints.items);
 }
