@@ -738,6 +738,7 @@ test "emitRoots writes generated property roots" {
     try aliases.loadPropertyLine("blk ; Block");
     try aliases.loadPropertyValueLine("blk ; ASCII ; Basic_Latin");
 
+    try db.finalizeRuneSets();
     try emitRoots(testing.allocator, .{ .io = testing.io, .dir = tmp.dir }, &db, &aliases);
 
     inline for (.{ "runicode.zig", "sets.zig", "codepoints.zig", "strs.zig", "enums.zig", "maps.zig" }) |path| {
@@ -795,6 +796,7 @@ test "emitRoots writes literal generated leaves" {
     try aliases.loadPropertyLine("blk ; Block");
     try aliases.loadPropertyValueLine("blk ; ASCII ; Basic_Latin");
 
+    try db.finalizeRuneSets();
     try emitRoots(testing.allocator, .{ .io = testing.io, .dir = tmp.dir }, &db, &aliases);
 
     const codepoints_root = try tmp.dir.readFileAlloc(testing.io, "codepoints.zig", testing.allocator, .limited(16 * 1024));

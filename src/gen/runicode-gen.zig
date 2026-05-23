@@ -6,8 +6,6 @@ const emit = @import("ucd/emit.zig");
 const manifest = @import("ucd/manifest.zig");
 const parse = @import("ucd/parse.zig");
 const unicoder = @import("unicoder");
-/// RuneSet is used only for derived aggregate properties, where unioning the
-/// final set is cheaper and less error-prone than replaying source ranges.
 const RuneSet = @import("runeset").RuneSet;
 const testing = std.testing;
 
@@ -54,6 +52,7 @@ pub fn main(init: std.process.Init) !void {
     // Composite General_Category values depend on the leaf values already being
     // loaded, and they should be normal DB values before emission starts.
     try addGeneralCategoryAggregates(allocator, &db, &aliases);
+    try db.finalizeRuneSets();
     try emit.emitRoots(allocator, .{
         .io = io,
         .dir = out_dir,
@@ -160,34 +159,19 @@ fn addGeneralCategoryAggregates(allocator: std.mem.Allocator, db: *Db, aliases: 
         const target = aliases.canonicalValue("gc", aggregate.target) orelse aggregate.target;
         if (group.value(target) != null) continue;
 
-        // Owns the accumulated union for this target. It starts empty so the
-        // first source can be adopted without doing a no-op union allocation.
-        var aggregate_set: ?RuneSet = null;
-        errdefer if (aggregate_set) |set| set.deinit(allocator);
+        var aggregate_ranges: std.ArrayList(parse.Range) = .empty;
+        defer aggregate_ranges.deinit(allocator);
 
         for (aggregate.sources) |source_alias| {
             // Source aliases are canonicalized for the same reason as the target:
             // the database stores names after alias resolution, not raw shorts.
             const source = aliases.canonicalValue("gc", source_alias) orelse source_alias;
             const source_value = group.value(source) orelse return error.MissingGeneralCategoryAggregateSource;
-
-            const source_set = source_value.rune_set orelse return error.MissingGeneralCategoryAggregateSource;
-            if (aggregate_set) |current_set| {
-                // RuneSet's union implementation handles compaction; the DB only
-                // materializes the final set once after all sources are merged.
-                const union_set = try current_set.setUnion(source_set, allocator);
-                current_set.deinit(allocator);
-                aggregate_set = union_set;
-            } else {
-                aggregate_set = try cloneRuneSet(allocator, source_set);
-            }
+            try aggregate_ranges.appendSlice(allocator, source_value.ranges.items);
         }
 
-        // The loop can only continue without a set if a table row has no
-        // sources, which current Unicode aggregate definitions do not do.
-        const set = aggregate_set orelse continue;
-        try db.addRuneSet("GeneralCategory", target, set);
-        set.deinit(allocator);
+        if (aggregate_ranges.items.len == 0) return error.InvalidGeneralCategoryAggregate;
+        try db.addRanges("GeneralCategory", target, aggregate_ranges.items);
     }
 }
 
@@ -202,7 +186,7 @@ const GeneralCategoryAggregate = struct {
     /// property-value alias file.
     target: []const u8,
 
-    /// Leaf category aliases whose RuneSets form the composite.
+    /// Leaf category aliases whose ranges form the composite.
     ///
     /// Sources are resolved through aliases because the DB stores canonical
     /// names even though the Unicode spec usually describes these sets by short
@@ -225,10 +209,6 @@ const general_category_aggregates = [_]GeneralCategoryAggregate{
     .{ .target = "S", .sources = &.{ "Sc", "Sk", "Sm", "So" } },
     .{ .target = "Z", .sources = &.{ "Zl", "Zp", "Zs" } },
 };
-
-fn cloneRuneSet(allocator: std.mem.Allocator, rune_set: RuneSet) !RuneSet {
-    return .{ .body = try allocator.dupe(u64, rune_set.body) };
-}
 
 fn expectRuneSetCodepoints(expected: []const u21, rune_set: RuneSet) !void {
     var actual: std.ArrayList(u21) = .empty;
@@ -278,6 +258,7 @@ test "codepoint property reader ignores comment defaults" {
 
     const block = db.property("Blocks").?;
     try testing.expect(block.value("No_Block") == null);
+    try db.finalizeRuneSets();
     const basic_latin = block.value("Basic Latin").?;
     try expectRuneSetCodepoints(&.{0x1}, basic_latin.rune_set.?);
 }
@@ -341,6 +322,7 @@ test "codepoint property reader ignores malformed missing comments" {
     });
 
     const block = db.property("Blocks").?;
+    try db.finalizeRuneSets();
     try expectRuneSetCodepoints(&.{0x1}, block.value("Basic Latin").?.rune_set.?);
 }
 
@@ -369,6 +351,7 @@ test "codepoint property reader keeps grouped binary properties separate" {
     });
 
     const properties = db.property("Properties").?;
+    try db.finalizeRuneSets();
     try expectRuneSetCodepoints(&.{0x09}, properties.value("White_Space").?.rune_set.?);
     try expectRuneSetCodepoints(&.{0x41}, properties.value("Alphabetic").?.rune_set.?);
     try testing.expect(properties.value("Y") == null);
@@ -436,6 +419,7 @@ test "general category aggregates synthesize alias targets" {
     }
 
     try addGeneralCategoryAggregates(testing.allocator, &db, &aliases);
+    try db.finalizeRuneSets();
 
     const group = db.property("GeneralCategory").?;
     try testing.expectEqual(@as(usize, 5), group.value("Letter").?.rune_set.?.runeCount());
@@ -490,6 +474,7 @@ test "script extensions inherit scripts and add explicit script values" {
     });
 
     const scripts_extended = db.property("ScriptsExtended").?;
+    try db.finalizeRuneSets();
     try expectRuneSetCodepoints(&.{ 0x0, 0x1, 0x2 }, scripts_extended.value("Latin").?.rune_set.?);
     try expectRuneSetCodepoints(&.{ 0x1, 0x3 }, scripts_extended.value("Greek").?.rune_set.?);
     try expectRuneSetCodepoints(&.{0x2}, scripts_extended.value("Cyrillic").?.rune_set.?);

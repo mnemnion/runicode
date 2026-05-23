@@ -6,19 +6,18 @@ const testing = std.testing;
 const unicoder = @import("unicoder");
 /// Shared parsed range type used by the file readers and the emitter.
 const parse = @import("parse.zig");
-/// Runtime set type retained by the DB for generated set/string/codepoint leaves.
+/// Runtime set type built once per value after all ranges are loaded.
 const RuneSet = @import("runeset").RuneSet;
 
 /// One concrete property value.
 ///
-/// Ranges preserve the UCD source shape for copying and diagnostics. `rune_set`
-/// is the normalized data used by emitters.
+/// Ranges preserve the UCD source shape while loading. `rune_set` is filled by
+/// `Db.finalizeRuneSets` before emission.
 pub const PropertyValue = struct {
-    /// Compact inclusive ranges as read from UCD, or reconstructed from a RuneSet.
+    /// Compact inclusive ranges as read from UCD or derived aggregate sources.
     ranges: std.ArrayList(parse.Range) = .empty,
 
-    /// Normalized set for this property value. It is optional only because map
-    /// slots are default-initialized before the first range is inserted.
+    /// Normalized set for this property value.
     rune_set: ?RuneSet = null,
 
     /// Releases all owned buffers for a property value.
@@ -28,19 +27,6 @@ pub const PropertyValue = struct {
     pub fn deinit(value: *PropertyValue, allocator: std.mem.Allocator) void {
         value.ranges.deinit(allocator);
         if (value.rune_set) |set| set.deinit(allocator);
-    }
-
-    /// Takes ownership of `owned_set` and unions it into this value's RuneSet.
-    fn addOwnedRuneSet(value: *PropertyValue, allocator: std.mem.Allocator, owned_set: RuneSet) !void {
-        if (value.rune_set) |current_set| {
-            errdefer owned_set.deinit(allocator);
-            const union_set = try current_set.setUnion(owned_set, allocator);
-            current_set.deinit(allocator);
-            owned_set.deinit(allocator);
-            value.rune_set = union_set;
-        } else {
-            value.rune_set = owned_set;
-        }
     }
 };
 
@@ -104,8 +90,8 @@ pub const PropertyGroup = struct {
 
 /// In-memory database of all property groups the generator will emit.
 ///
-/// This is intentionally simple: the expensive RuneSet normalization happens
-/// while data is loaded so emission can walk plain maps.
+/// This is intentionally simple: readers append ranges, then a finalization pass
+/// builds the RuneSets consumed by emission.
 pub const Db = struct {
     /// Allocator used for group names, groups, and all nested property values.
     allocator: std.mem.Allocator,
@@ -149,35 +135,32 @@ pub const Db = struct {
         return db.groups.count();
     }
 
-    /// Adds one inclusive range to a property value and merges it into the
-    /// value's retained RuneSet.
+    /// Adds one inclusive range to a property value.
     pub fn addRange(db: *Db, property_name: []const u8, value_name: []const u8, range: parse.Range) !void {
-        const group = try db.getOrPutProperty(property_name);
-        const prop_value = try group.getOrPutValue(value_name);
-
-        const range_set = try createRuneSetFromRanges(&.{range}, db.allocator);
-        const old_ranges_len = prop_value.ranges.items.len;
-        try prop_value.ranges.append(db.allocator, range);
-        errdefer prop_value.ranges.shrinkRetainingCapacity(old_ranges_len);
-        try prop_value.addOwnedRuneSet(db.allocator, range_set);
+        try db.addRanges(property_name, value_name, &.{range});
     }
 
-    /// Adds a complete RuneSet to a property value.
-    ///
-    /// Aggregate properties are cheaper to build as RuneSet unions than by
-    /// replaying many source ranges. This stores both the compact ranges rebuilt
-    /// from the set and a cloned RuneSet owned by the database.
-    pub fn addRuneSet(db: *Db, property_name: []const u8, value_name: []const u8, rune_set: RuneSet) !void {
+    /// Adds inclusive ranges to a property value.
+    pub fn addRanges(db: *Db, property_name: []const u8, value_name: []const u8, ranges: []const parse.Range) !void {
+        if (ranges.len == 0) return error.EmptyRangeSet;
+
         const group = try db.getOrPutProperty(property_name);
         const prop_value = try group.getOrPutValue(value_name);
+        try prop_value.ranges.appendSlice(db.allocator, ranges);
+    }
 
-        var compact_ranges = try rangesFromRuneSet(db.allocator, rune_set);
-        defer compact_ranges.deinit(db.allocator);
-        const old_ranges_len = prop_value.ranges.items.len;
-        try prop_value.ranges.appendSlice(db.allocator, compact_ranges.items);
-        errdefer prop_value.ranges.shrinkRetainingCapacity(old_ranges_len);
-
-        try prop_value.addOwnedRuneSet(db.allocator, try cloneRuneSet(db.allocator, rune_set));
+    /// Builds exactly one retained RuneSet for every loaded property value.
+    pub fn finalizeRuneSets(db: *Db) !void {
+        var group_it = db.groups.iterator();
+        while (group_it.next()) |group_entry| {
+            var value_it = group_entry.value_ptr.values.iterator();
+            while (value_it.next()) |value_entry| {
+                const value = value_entry.value_ptr;
+                if (value.rune_set != null) return error.RuneSetAlreadyFinalized;
+                if (value.ranges.items.len == 0) return error.EmptyRangeSet;
+                value.rune_set = try createRuneSetFromRanges(value.ranges.items, db.allocator);
+            }
+        }
     }
 
     /// Finds or creates a property group and takes ownership of the group name.
@@ -198,11 +181,6 @@ pub const Db = struct {
     }
 };
 
-/// Clones a RuneSet body so the database owns its stored set.
-fn cloneRuneSet(allocator: std.mem.Allocator, rune_set: RuneSet) !RuneSet {
-    return .{ .body = try allocator.dupe(u64, rune_set.body) };
-}
-
 /// Expands ranges to WTF-8 and constructs a RuneSet from the mutable scratch
 /// buffer.
 fn createRuneSetFromRanges(ranges: []const parse.Range, allocator: std.mem.Allocator) !RuneSet {
@@ -218,33 +196,7 @@ fn createRuneSetFromRanges(ranges: []const parse.Range, allocator: std.mem.Alloc
         }
     }
 
-    const mutable = try bytes.toOwnedSlice(allocator);
-    defer allocator.free(mutable);
-    return try RuneSet.createFromMutableString(mutable, allocator);
-}
-
-/// Rebuilds compact ranges from RuneSet's sorted iteration order.
-fn rangesFromRuneSet(allocator: std.mem.Allocator, rune_set: RuneSet) !std.ArrayList(parse.Range) {
-    var ranges: std.ArrayList(parse.Range) = .empty;
-    errdefer ranges.deinit(allocator);
-
-    var pending_range: ?parse.Range = null;
-    var iter = rune_set.iterateRunes();
-    while (iter.next()) |rune| {
-        const codepoint = codepointFromRune(rune);
-        if (pending_range) |*range| {
-            if (range.last != std.math.maxInt(u21) and range.last + 1 == codepoint) {
-                range.last = codepoint;
-            } else {
-                try ranges.append(allocator, range.*);
-                pending_range = .{ .first = codepoint, .last = codepoint };
-            }
-        } else {
-            pending_range = .{ .first = codepoint, .last = codepoint };
-        }
-    }
-    if (pending_range) |range| try ranges.append(allocator, range);
-    return ranges;
+    return try RuneSet.createFromMutableString(bytes.items, allocator);
 }
 
 /// Decodes the single WTF-8 rune slice yielded by RuneSet iteration.
@@ -271,6 +223,7 @@ test "property group accumulates range as ranges and runeset" {
     defer db.deinit();
 
     try db.addRange("GeneralCategory", "Lu", .{ .first = 0x41, .last = 0x43 });
+    try db.finalizeRuneSets();
 
     const prop = db.property("GeneralCategory").?;
     const value = prop.value("Lu").?;
@@ -283,26 +236,9 @@ test "surrogate codepoints are retained in the runeset" {
     defer db.deinit();
 
     try db.addRange("GeneralCategory", "Cs", .{ .first = 0xD800, .last = 0xD800 });
+    try db.finalizeRuneSets();
 
     const prop = db.property("GeneralCategory").?;
     const value = prop.value("Cs").?;
     try expectRuneSetCodepoints(&.{0xD800}, value.rune_set.?);
-}
-
-test "property group accumulates runeset as compact ranges and stored runeset" {
-    var db = Db.init(testing.allocator);
-    defer db.deinit();
-
-    const rune_set = try RuneSet.createFromConstString("ABCX", testing.allocator);
-    defer rune_set.deinit(testing.allocator);
-
-    try db.addRuneSet("GeneralCategory", "Letter", rune_set);
-
-    const prop = db.property("GeneralCategory").?;
-    const value = prop.value("Letter").?;
-    try testing.expectEqualSlices(parse.Range, &.{
-        .{ .first = 0x41, .last = 0x43 },
-        .{ .first = 0x58, .last = 0x58 },
-    }, value.ranges.items);
-    try expectRuneSetCodepoints(&.{ 0x41, 0x42, 0x43, 0x58 }, value.rune_set.?);
 }
