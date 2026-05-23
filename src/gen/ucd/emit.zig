@@ -2,6 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 
 const Db = @import("db.zig").Db;
+const Range = @import("parse.zig").Range;
 const RuneSet = LocalRuneSet;
 
 pub const OutputDir = struct {
@@ -42,6 +43,7 @@ fn writeRootFile(
 
 fn writeStrsRoot(writer: *std.Io.Writer, group_names: []const []const u8, db: *Db) !void {
     try writer.writeAll(header_txt);
+    try writer.writeAll(strs_prelude);
     for (group_names) |group_name| {
         const group = db.property(group_name).?;
         const value_names = try sortedValueNames(group.allocator, group);
@@ -50,9 +52,9 @@ fn writeStrsRoot(writer: *std.Io.Writer, group_names: []const []const u8, db: *D
         try writer.print("pub const {f} = struct {{\n", .{identifier(group_name)});
         for (value_names) |value_name| {
             const value = group.value(value_name).?;
-            try writer.print("    pub const {f} = \"", .{identifier(value_name)});
-            try writeEscapedBytes(writer, value.utf8.items);
-            try writer.writeAll("\";\n");
+            try writer.print("    pub const {f} = expandWtf8(&.{{", .{identifier(value_name)});
+            try writeRanges(writer, value.ranges.items);
+            try writer.writeAll(" });\n");
         }
         try writer.writeAll("};\n\n");
     }
@@ -60,6 +62,7 @@ fn writeStrsRoot(writer: *std.Io.Writer, group_names: []const []const u8, db: *D
 
 fn writeCodepointsRoot(writer: *std.Io.Writer, group_names: []const []const u8, db: *Db) !void {
     try writer.writeAll(header_txt);
+    try writer.writeAll(codepoints_prelude);
     for (group_names) |group_name| {
         const group = db.property(group_name).?;
         const value_names = try sortedValueNames(group.allocator, group);
@@ -67,12 +70,10 @@ fn writeCodepointsRoot(writer: *std.Io.Writer, group_names: []const []const u8, 
 
         try writer.print("pub const {f} = struct {{\n", .{identifier(group_name)});
         for (value_names) |value_name| {
-            const codepoints = group.value(value_name).?.codepoints.items;
-            try writer.print("    pub const {f}: [{d}]u21 = .{{", .{ identifier(value_name), codepoints.len });
-            for (codepoints) |codepoint| {
-                try writer.print(" 0x{X},", .{codepoint});
-            }
-            try writer.writeAll(" };\n");
+            const value = group.value(value_name).?;
+            try writer.print("    pub const {f} = expandCodepoints(&.{{", .{identifier(value_name)});
+            try writeRanges(writer, value.ranges.items);
+            try writer.writeAll(" });\n");
         }
         try writer.writeAll("};\n\n");
     }
@@ -94,7 +95,7 @@ fn writeSetsRoot(
         try writer.print("pub const {f} = struct {{\n", .{identifier(group_name)});
         for (value_names) |value_name| {
             const value = group.value(value_name).?;
-            const rune_set = try RuneSet.createFromConstString(value.utf8.items, allocator);
+            const rune_set = try RuneSet.createFromRanges(value.ranges.items, allocator);
             defer rune_set.deinit(allocator);
             const set_name = try ownedIdentifier(allocator, value_name);
             defer if (set_name.ptr != value_name.ptr) allocator.free(set_name);
@@ -149,6 +150,12 @@ fn writeMapsRoot(writer: *std.Io.Writer, group_names: []const []const u8) !void 
             identifier(group_name),
             identifier(group_name),
         });
+    }
+}
+
+fn writeRanges(writer: *std.Io.Writer, ranges: []const Range) !void {
+    for (ranges) |range| {
+        try writer.print(" .{{ .first = 0x{X}, .last = 0x{X} }},", .{ range.first, range.last });
     }
 }
 
@@ -243,6 +250,90 @@ const header_txt =
     \\
 ;
 
+const codepoints_prelude =
+    \\const Range = struct { first: u21, last: u21 };
+    \\
+    \\fn rangeCodepointCount(comptime ranges: []const Range) comptime_int {
+    \\    var count: comptime_int = 0;
+    \\    for (ranges) |range| count += range.last - range.first + 1;
+    \\    return count;
+    \\}
+    \\
+    \\fn expandCodepoints(comptime ranges: []const Range) [rangeCodepointCount(ranges)]u21 {
+    \\    var result: [rangeCodepointCount(ranges)]u21 = undefined;
+    \\    var idx: usize = 0;
+    \\    for (ranges) |range| {
+    \\        var codepoint = range.first;
+    \\        while (codepoint <= range.last) : (codepoint += 1) {
+    \\            result[idx] = codepoint;
+    \\            idx += 1;
+    \\        }
+    \\    }
+    \\    return result;
+    \\}
+    \\
+    \\
+;
+
+const strs_prelude =
+    \\const Range = struct { first: u21, last: u21 };
+    \\
+    \\fn rangeWtf8Len(comptime ranges: []const Range) comptime_int {
+    \\    var len: comptime_int = 0;
+    \\    for (ranges) |range| {
+    \\        var codepoint = range.first;
+    \\        while (codepoint <= range.last) : (codepoint += 1) {
+    \\            len += wtf8Len(codepoint);
+    \\        }
+    \\    }
+    \\    return len;
+    \\}
+    \\
+    \\fn wtf8Len(comptime codepoint: u21) comptime_int {
+    \\    if (codepoint <= 0x7F) return 1;
+    \\    if (codepoint <= 0x7FF) return 2;
+    \\    if (codepoint <= 0xFFFF) return 3;
+    \\    return 4;
+    \\}
+    \\
+    \\fn expandWtf8(comptime ranges: []const Range) [rangeWtf8Len(ranges)]u8 {
+    \\    var result: [rangeWtf8Len(ranges)]u8 = undefined;
+    \\    var idx: usize = 0;
+    \\    for (ranges) |range| {
+    \\        var codepoint = range.first;
+    \\        while (codepoint <= range.last) : (codepoint += 1) {
+    \\            idx += writeWtf8(codepoint, result[idx..]);
+    \\        }
+    \\    }
+    \\    return result;
+    \\}
+    \\
+    \\fn writeWtf8(comptime codepoint: u21, dest: []u8) usize {
+    \\    if (codepoint <= 0x7F) {
+    \\        dest[0] = @intCast(codepoint);
+    \\        return 1;
+    \\    }
+    \\    if (codepoint <= 0x7FF) {
+    \\        dest[0] = 0xC0 | @as(u8, @intCast(codepoint >> 6));
+    \\        dest[1] = 0x80 | @as(u8, @intCast(codepoint & 0x3F));
+    \\        return 2;
+    \\    }
+    \\    if (codepoint <= 0xFFFF) {
+    \\        dest[0] = 0xE0 | @as(u8, @intCast(codepoint >> 12));
+    \\        dest[1] = 0x80 | @as(u8, @intCast((codepoint >> 6) & 0x3F));
+    \\        dest[2] = 0x80 | @as(u8, @intCast(codepoint & 0x3F));
+    \\        return 3;
+    \\    }
+    \\    dest[0] = 0xF0 | @as(u8, @intCast(codepoint >> 18));
+    \\    dest[1] = 0x80 | @as(u8, @intCast((codepoint >> 12) & 0x3F));
+    \\    dest[2] = 0x80 | @as(u8, @intCast((codepoint >> 6) & 0x3F));
+    \\    dest[3] = 0x80 | @as(u8, @intCast(codepoint & 0x3F));
+    \\    return 4;
+    \\}
+    \\
+    \\
+;
+
 const LocalRuneSet = struct {
     body: []const u64,
 
@@ -256,6 +347,22 @@ const LocalRuneSet = struct {
         return .{ .body = try createBodyFromString(mutable, allocator) };
     }
 
+    fn createFromRanges(ranges: []const Range, allocator: std.mem.Allocator) !LocalRuneSet {
+        var bytes: std.ArrayList(u8) = .empty;
+        defer bytes.deinit(allocator);
+
+        for (ranges) |range| {
+            var codepoint = range.first;
+            while (codepoint <= range.last) : (codepoint += 1) {
+                var buf: [4]u8 = undefined;
+                const len = try wtf8Encode(codepoint, &buf);
+                try bytes.appendSlice(allocator, buf[0..len]);
+            }
+        }
+
+        return createFromConstString(bytes.items, allocator);
+    }
+
     fn serialize(set: LocalRuneSet, writer: *std.Io.Writer, public: Privacy, name: []const u8) !void {
         if (public == .public) try writer.writeAll("pub ");
         try writer.print("const {s} = RuneSet{{ .body = &.{{ 0x{x}", .{ name, set.body[0] });
@@ -267,6 +374,21 @@ const LocalRuneSet = struct {
 
     const Privacy = enum { private, public };
 };
+
+fn wtf8Encode(codepoint: u21, buf: []u8) !usize {
+    if (codepoint >= 0xD800 and codepoint <= 0xDFFF) {
+        if (buf.len < 3) return error.NoSpaceLeft;
+        buf[0] = 0xE0 | @as(u8, @intCast(codepoint >> 12));
+        buf[1] = 0x80 | @as(u8, @intCast((codepoint >> 6) & 0x3F));
+        buf[2] = 0x80 | @as(u8, @intCast(codepoint & 0x3F));
+        return 3;
+    }
+    const len = std.unicode.utf8Encode(codepoint, buf) catch |err| switch (err) {
+        error.Utf8CannotEncodeSurrogateHalf => unreachable,
+        error.CodepointTooLarge => return err,
+    };
+    return @intCast(len);
+}
 
 const LOW = 0;
 const HI = 1;
@@ -548,4 +670,26 @@ test "emitRoots writes generated property roots" {
 
     try testing.expect(std.mem.indexOf(u8, strs, "pub const GeneralCategory") != null);
     try testing.expect(std.mem.indexOf(u8, strs, "pub const Lu") != null);
+}
+
+test "emitRoots writes compact range expansion for large roots" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var db = Db.init(testing.allocator);
+    defer db.deinit();
+
+    try db.addRange("Blocks", "No_Block", .{ .first = 0x0, .last = 0x10FFFF });
+
+    try emitRoots(testing.allocator, .{ .io = testing.io, .dir = tmp.dir }, &db);
+
+    const codepoints = try tmp.dir.readFileAlloc(testing.io, "codepoints.zig", testing.allocator, .limited(16 * 1024));
+    defer testing.allocator.free(codepoints);
+    const strs = try tmp.dir.readFileAlloc(testing.io, "strs.zig", testing.allocator, .limited(16 * 1024));
+    defer testing.allocator.free(strs);
+
+    try testing.expect(std.mem.indexOf(u8, codepoints, "expandCodepoints") != null);
+    try testing.expect(std.mem.indexOf(u8, codepoints, "0x10FFFF") != null);
+    try testing.expect(std.mem.indexOf(u8, strs, "expandWtf8") != null);
+    try testing.expect(std.mem.indexOf(u8, strs, "0x10FFFF") != null);
 }

@@ -102,7 +102,7 @@ fn readCodepointPropertyFile(
         else if (field_list.items.len == 3)
             field_list.items[2]
         else
-            "Y";
+            canonical_property;
         const value = aliases.canonicalValue(canonical_property, raw_value) orelse raw_value;
 
         if (is_missing) {
@@ -293,4 +293,34 @@ test "codepoint property reader gives later missing defaults precedence" {
     const bidi = db.property("BidiClass").?;
     try testing.expectEqualSlices(u21, &.{0x0}, bidi.value("Left_To_Right").?.codepoints.items);
     try testing.expectEqualSlices(u21, &.{ 0x1, 0x2 }, bidi.value("Right_To_Left").?.codepoints.items);
+}
+
+test "codepoint property reader keeps grouped binary properties separate" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{
+        .sub_path = "PropList.txt",
+        .data =
+        \\0009; White_Space
+        \\0041; Alphabetic
+        \\
+        ,
+    });
+
+    var aliases = Aliases.init(testing.allocator);
+    defer aliases.deinit();
+
+    var db = Db.init(testing.allocator);
+    defer db.deinit();
+
+    try readCodepointPropertyFile(testing.io, testing.allocator, tmp.dir, &db, &aliases, .{
+        .path = "PropList.txt",
+        .kind = .codepoint_property,
+        .namespace = "Properties",
+    });
+
+    const properties = db.property("Properties").?;
+    try testing.expectEqualSlices(u21, &.{0x09}, properties.value("White_Space").?.codepoints.items);
+    try testing.expectEqualSlices(u21, &.{0x41}, properties.value("Alphabetic").?.codepoints.items);
+    try testing.expect(properties.value("Y") == null);
 }

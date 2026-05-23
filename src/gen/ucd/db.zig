@@ -3,10 +3,12 @@ const testing = std.testing;
 const parse = @import("parse.zig");
 
 pub const PropertyValue = struct {
+    ranges: std.ArrayList(parse.Range) = .empty,
     codepoints: std.ArrayList(u21) = .empty,
     utf8: std.ArrayList(u8) = .empty,
 
     pub fn deinit(value: *PropertyValue, allocator: std.mem.Allocator) void {
+        value.ranges.deinit(allocator);
         value.codepoints.deinit(allocator);
         value.utf8.deinit(allocator);
     }
@@ -75,6 +77,7 @@ pub const Db = struct {
     pub fn addRange(db: *Db, property_name: []const u8, value_name: []const u8, range: parse.Range) !void {
         const group = try db.getOrPutProperty(property_name);
         const prop_value = try group.getOrPutValue(value_name);
+        try prop_value.ranges.append(db.allocator, range);
 
         var codepoint = range.first;
         while (codepoint <= range.last) : (codepoint += 1) {
