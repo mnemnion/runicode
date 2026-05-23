@@ -100,9 +100,21 @@ pub fn build(b: *std.Build) void {
 
     const run_gen_unit_tests = b.addRunArtifact(gen_unit_tests);
 
+    const runicode_api_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("src/test/runicode-generated.zig"),
+        }),
+    });
+    runicode_api_tests.root_module.addImport("runicode", runicode_mod);
+
+    const run_runicode_api_tests = b.addRunArtifact(runicode_api_tests);
+
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tool_unit_tests.step);
     test_step.dependOn(&run_gen_unit_tests.step);
+    test_step.dependOn(&run_runicode_api_tests.step);
 }
 
 const CleanInstallDir = struct {

@@ -52,7 +52,7 @@ pub fn freeGroupMeta(allocator: std.mem.Allocator, groups: []const GroupMeta) vo
 pub fn emitRoots(allocator: std.mem.Allocator, dir: OutputDir, db: anytype, aliases: *const Aliases) !void {
     const groups = try emitGroups(allocator, dir, db, aliases);
     defer freeGroupMeta(allocator, groups);
-    try emitRootIndexes(allocator, dir, groups);
+    try emitRootIndexes(allocator, dir, groups, aliases);
 }
 
 /// Writes per-group generated files and returns metadata for the root pass.
@@ -76,21 +76,25 @@ pub fn emitGroupsOwned(
     errdefer freeGroupMeta(metadata_allocator, groups);
 
     try writeDataGroupFiles(scratch_allocator, dir, group_names, db, aliases);
-    try writeMapsGroupFiles(scratch_allocator, dir, group_names);
 
     return groups;
 }
 
 //
 /// Writes only root index files from precomputed group metadata.
-pub fn emitRootIndexes(allocator: std.mem.Allocator, dir: OutputDir, groups: []const GroupMeta) !void {
+pub fn emitRootIndexes(
+    allocator: std.mem.Allocator,
+    dir: OutputDir,
+    groups: []const GroupMeta,
+    aliases: *const Aliases,
+) !void {
     const sorted_groups = try allocator.dupe(GroupMeta, groups);
     defer allocator.free(sorted_groups);
     std.mem.sort(GroupMeta, sorted_groups, {}, groupMetaLessThan);
 
-    try writeDataRootFiles(allocator, dir, sorted_groups);
-    try writeRootFile(dir, dir.enums_path, writeEnumsRoot, .{ allocator, sorted_groups });
-    try writeMapsRootFile(allocator, dir, sorted_groups);
+    try writeDataRootFiles(allocator, dir, sorted_groups, aliases);
+    try writeRootFile(dir, dir.enums_path, writeEnumsRoot, .{ allocator, sorted_groups, aliases });
+    try writeMapsRootFile(allocator, dir, sorted_groups, aliases);
     try writeRootFile(dir, dir.runicode_path, writeRunicodeRoot, .{});
 }
 
@@ -153,10 +157,11 @@ fn writeDataRootFiles(
     allocator: std.mem.Allocator,
     dir: OutputDir,
     groups: []const GroupMeta,
+    aliases: *const Aliases,
 ) !void {
-    try writeDataRootFile(allocator, dir, dir.sets_path, "sets", groups);
-    try writeDataRootFile(allocator, dir, dir.codepoints_path, "codepoints", groups);
-    try writeDataRootFile(allocator, dir, dir.strs_path, "strs", groups);
+    try writeDataRootFile(allocator, dir, dir.sets_path, "sets", groups, aliases);
+    try writeDataRootFile(allocator, dir, dir.codepoints_path, "codepoints", groups, aliases);
+    try writeDataRootFile(allocator, dir, dir.strs_path, "strs", groups, aliases);
 }
 
 fn writeDataRootFile(
@@ -165,6 +170,7 @@ fn writeDataRootFile(
     path: []const u8,
     prefix: []const u8,
     groups: []const GroupMeta,
+    aliases: *const Aliases,
 ) !void {
     var file = try dir.dir.createFile(dir.io, path, .{ .lock = .exclusive });
     defer file.close(dir.io);
@@ -178,6 +184,7 @@ fn writeDataRootFile(
         defer allocator.free(group_path);
         try writer.print("pub const {f} = @import(\"{s}\");\n", .{ identifier(group.name), group_path });
     }
+    try writeRootGroupAliases(allocator, writer, groups, aliases, "");
     try writer.flush();
 }
 
@@ -432,11 +439,17 @@ fn writeGroupValueAliases(
 }
 
 /// Writes one enum per property group into enums.zig.
-fn writeEnumsRoot(writer: *std.Io.Writer, allocator: std.mem.Allocator, groups: []const GroupMeta) !void {
+fn writeEnumsRoot(
+    writer: *std.Io.Writer,
+    allocator: std.mem.Allocator,
+    groups: []const GroupMeta,
+    aliases: *const Aliases,
+) !void {
     try writer.writeAll(header_txt);
     for (groups) |group| {
         try writeEnumType(allocator, writer, group.name, group.values);
     }
+    try writeRootGroupAliases(allocator, writer, groups, aliases, "");
 }
 
 fn writeEnumType(allocator: std.mem.Allocator, writer: *std.Io.Writer, group_name: []const u8, value_names: []const []const u8) !void {
@@ -461,6 +474,7 @@ fn writeRunicodeRoot(writer: *std.Io.Writer) !void {
         \\
         \\/// Unicode property data as UTF-8 strings.
         \\pub const strs = @import("strs.zig");
+        \\pub const strings = strs;
         \\
         \\/// Unicode property enum types.
         \\pub const enums = @import("enums.zig");
@@ -468,27 +482,19 @@ fn writeRunicodeRoot(writer: *std.Io.Writer) !void {
         \\/// Loose-matching maps for Unicode property namespaces.
         \\pub const maps = @import("maps.zig");
         \\
+        \\/// Loose-matching map over generated Unicode property set maps.
+        \\pub const NamedSetMaps = maps.NamedSetMaps;
+        \\
+        \\/// Loose-matching map over generated Unicode property codepoint maps.
+        \\pub const NamedCodepointMaps = maps.NamedCodepointMaps;
+        \\
+        \\/// Loose-matching map over generated Unicode property string maps.
+        \\pub const NamedStringMaps = maps.NamedStringMaps;
+        \\
         \\/// Compile-time constructor for loose-matching property maps.
         \\pub const NamedMap = @import("ucd-tools").NamedMap;
         \\
     );
-}
-
-fn writeMapsGroupFiles(
-    allocator: std.mem.Allocator,
-    dir: OutputDir,
-    group_names: []const []const u8,
-) !void {
-    try dir.dir.createDirPath(dir.io, "maps");
-
-    for (group_names) |group_name| {
-        if (!isMappedGroup(group_name)) continue;
-
-        const group_path = try semanticGroupFilePath(allocator, "maps", group_name);
-        defer allocator.free(group_path);
-        try createParentDirPath(dir, group_path);
-        try writeMapGroupFile(allocator, dir, group_path, group_name);
-    }
 }
 
 /// Writes maps.zig from group metadata.
@@ -496,6 +502,7 @@ fn writeMapsRootFile(
     allocator: std.mem.Allocator,
     dir: OutputDir,
     groups: []const GroupMeta,
+    aliases: *const Aliases,
 ) !void {
     var root_file = try dir.dir.createFile(dir.io, dir.maps_path, .{ .lock = .exclusive });
     defer root_file.close(dir.io);
@@ -504,74 +511,127 @@ fn writeMapsRootFile(
     const writer = &root_writer.interface;
 
     try writer.writeAll(header_txt);
+    try writer.writeAll("const ucd_tools = @import(\"ucd-tools\");\n\n");
+    try writeKindMapSource(allocator, writer, groups, aliases, "sets", "sets", "NamedSetMaps");
+    try writeKindMapSource(allocator, writer, groups, aliases, "codepoints", "codepoints", "NamedCodepointMaps");
+    try writeKindMapSource(allocator, writer, groups, aliases, "strings", "strs", "NamedStringMaps");
+    try writer.writeAll("pub const strs = strings;\n");
+    try writer.flush();
+}
+
+fn writeKindMapSource(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    groups: []const GroupMeta,
+    aliases: *const Aliases,
+    namespace_name: []const u8,
+    import_prefix: []const u8,
+    named_maps_name: []const u8,
+) !void {
+    try writer.print("pub const {f} = struct {{\n", .{identifier(namespace_name)});
+    for (groups) |group| {
+        const group_path = try semanticGroupFilePath(allocator, import_prefix, group.name);
+        defer allocator.free(group_path);
+        try writer.print("    pub const {f} = ucd_tools.NamedMap(@import(\"{s}\"));\n", .{ identifier(group.name), group_path });
+    }
+    try writeRootGroupAliases(allocator, writer, groups, aliases, "    ");
+    try writer.writeAll("};\n\n");
+    try writer.print("pub const {f} = ucd_tools.NamedMap({f});\n\n", .{
+        identifier(named_maps_name),
+        identifier(namespace_name),
+    });
+}
+
+fn writeRootGroupAliases(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    groups: []const GroupMeta,
+    aliases: *const Aliases,
+    indent: []const u8,
+) !void {
+    var seen_decls: std.StringHashMapUnmanaged(void) = .empty;
+    defer freeSeenMatches(allocator, &seen_decls);
 
     for (groups) |group| {
-        if (!isMappedGroup(group.name)) continue;
-
-        const group_path = try semanticGroupFilePath(allocator, "maps", group.name);
-        defer allocator.free(group_path);
-        try writer.print("pub const {f} = @import(\"{s}\");\n", .{ identifier(group.name), group_path });
+        const group_decl = try allocator.dupe(u8, group.name);
+        errdefer allocator.free(group_decl);
+        const result = try seen_decls.getOrPut(allocator, group_decl);
+        if (result.found_existing) allocator.free(group_decl);
     }
-    try writer.flush();
+
+    for (groups) |group| {
+        const group_aliases = try rootAliasesForGroup(allocator, aliases, group.name);
+        defer freeStringList(allocator, group_aliases);
+
+        for (group_aliases) |alias| {
+            const alias_decl = try declName(allocator, alias);
+            errdefer allocator.free(alias_decl);
+            if (std.mem.eql(u8, alias_decl, group.name)) {
+                allocator.free(alias_decl);
+                continue;
+            }
+
+            const result = try seen_decls.getOrPut(allocator, alias_decl);
+            if (result.found_existing) {
+                allocator.free(alias_decl);
+                continue;
+            }
+            try writer.print("{s}pub const {f} = {f};\n", .{ indent, identifier(alias_decl), identifier(group.name) });
+        }
+    }
 }
 
-/// Writes one maps/<group>.zig file. Each map module imports that group's sets,
-/// codepoints, strings, and enum so `NamedMap` can expose loose lookup tables.
-fn writeMapGroupFile(allocator: std.mem.Allocator, dir: OutputDir, path: []const u8, group_name: []const u8) !void {
-    var file = try dir.dir.createFile(dir.io, path, .{ .lock = .exclusive });
-    defer file.close(dir.io);
-    var buf: [4096]u8 = undefined;
-    var file_writer = file.writer(dir.io, &buf);
-    const writer = &file_writer.interface;
+fn rootAliasesForGroup(
+    allocator: std.mem.Allocator,
+    aliases: *const Aliases,
+    group_name: []const u8,
+) ![][]const u8 {
+    var result: std.ArrayList([]const u8) = .empty;
+    errdefer {
+        for (result.items) |item| allocator.free(item);
+        result.deinit(allocator);
+    }
 
-    const sets_target = try semanticGroupFilePath(allocator, "sets", group_name);
-    defer allocator.free(sets_target);
-    const sets_path = try relativeImportPath(allocator, path, sets_target);
-    defer allocator.free(sets_path);
-    const codepoints_target = try semanticGroupFilePath(allocator, "codepoints", group_name);
-    defer allocator.free(codepoints_target);
-    const codepoints_path = try relativeImportPath(allocator, path, codepoints_target);
-    defer allocator.free(codepoints_path);
-    const strs_target = try semanticGroupFilePath(allocator, "strs", group_name);
-    defer allocator.free(strs_target);
-    const strs_path = try relativeImportPath(allocator, path, strs_target);
-    defer allocator.free(strs_path);
-    const enums_path = try relativeImportPath(allocator, path, "enums.zig");
-    defer allocator.free(enums_path);
+    const alias_group = rootAliasGroup(group_name) orelse return try allocator.alloc([]const u8, 0);
 
-    try writer.writeAll(header_txt);
-    try writer.print(
-        \\const ucd_tools = @import("ucd-tools");
-        \\const sets = @import("{s}");
-        \\const codepoints = @import("{s}");
-        \\const strs = @import("{s}");
-        \\const enums = @import("{s}");
-        \\
-        \\
-        \\
-    , .{ sets_path, codepoints_path, strs_path, enums_path });
-    try writer.print(
-        \\pub const Sets = ucd_tools.NamedMap(sets);
-        \\pub const Codepoints = ucd_tools.NamedMap(codepoints);
-        \\pub const Strs = ucd_tools.NamedMap(strs);
-        \\pub const Enum = enums.{f};
-        \\
-    , .{
-        identifier(group_name),
-    });
-    try writer.flush();
-}
+    if (alias_group.property) |property| {
+        const canonical_property = aliases.canonicalProperty(property) orelse property;
+        var property_it = aliases.properties.iterator();
+        while (property_it.next()) |entry| {
+            if (!std.mem.eql(u8, entry.value_ptr.*, canonical_property)) continue;
+            try appendUniqueString(allocator, &result, entry.key_ptr.*);
+        }
+    }
 
-/// Returns an import path from `from_path` to `target_path`.
-fn relativeImportPath(allocator: std.mem.Allocator, from_path: []const u8, target_path: []const u8) ![]const u8 {
-    const from_dir = std.fs.path.dirname(from_path) orelse "";
-    var result: std.ArrayList(u8) = .empty;
-    errdefer result.deinit(allocator);
+    for (alias_group.extra_aliases) |alias| try appendUniqueString(allocator, &result, alias);
 
-    var components = std.mem.tokenizeScalar(u8, from_dir, '/');
-    while (components.next()) |_| try result.appendSlice(allocator, "../");
-    try result.appendSlice(allocator, target_path);
+    std.mem.sort([]const u8, result.items, {}, ltString);
     return try result.toOwnedSlice(allocator);
+}
+
+fn appendUniqueString(
+    allocator: std.mem.Allocator,
+    list: *std.ArrayList([]const u8),
+    value: []const u8,
+) !void {
+    for (list.items) |item| {
+        if (std.mem.eql(u8, item, value)) return;
+    }
+    const owned_value = try allocator.dupe(u8, value);
+    errdefer allocator.free(owned_value);
+    try list.append(allocator, owned_value);
+}
+
+fn freeStringList(allocator: std.mem.Allocator, list: []const []const u8) void {
+    for (list) |item| allocator.free(item);
+    allocator.free(list);
+}
+
+fn rootAliasGroup(group_name: []const u8) ?RootAliasGroup {
+    for (root_alias_groups) |alias_group| {
+        if (std.mem.eql(u8, alias_group.group, group_name)) return alias_group;
+    }
+    return null;
 }
 
 /// Frees copied keys stored in temporary string maps.
@@ -755,24 +815,48 @@ fn groupMetaLessThan(_: void, left: GroupMeta, right: GroupMeta) bool {
     return ltString({}, left.name, right.name);
 }
 
-/// Returns whether this group gets a maps/<group>.zig module.
-fn isMappedGroup(name: []const u8) bool {
-    inline for (mapped_groups) |mapped_group| {
-        if (std.mem.eql(u8, name, mapped_group)) return true;
-    }
-    return false;
-}
+const RootAliasGroup = struct {
+    group: []const u8,
+    property: ?[]const u8 = null,
+    extra_aliases: []const []const u8 = &.{},
+};
 
-/// Property groups with generated maps/<group>.zig files.
-const mapped_groups = [_][]const u8{
-    "Blocks",
-    "CoreProperties",
-    "GeneralCategory",
-    "GraphemeBreak",
-    "Scripts",
-    "ScriptsExtended",
-    "SentenceBreak",
-    "WordBreak",
+const root_alias_groups = [_]RootAliasGroup{
+    .{ .group = "Age", .property = "age" },
+    .{ .group = "BidiClass", .property = "bc" },
+    .{ .group = "Blocks", .property = "blk" },
+    .{ .group = "CombiningClass", .property = "ccc" },
+    .{ .group = "DecompositionType", .property = "dt" },
+    .{ .group = "EastAsianWidth", .property = "ea" },
+    .{ .group = "GeneralCategory", .property = "gc" },
+    .{
+        .group = "GraphemeBreak",
+        .property = "GCB",
+        .extra_aliases = &.{
+            "gcb",
+            "gbp",
+            "Grapheme_Break_Property",
+            "GraphemeBreakProperty",
+        },
+    },
+    .{ .group = "HangulSyllableType", .property = "hst" },
+    .{ .group = "IndicPositionalCategory", .property = "InPC" },
+    .{ .group = "IndicSyllabicCategory", .property = "InSC" },
+    .{ .group = "JoiningGroup", .property = "jg" },
+    .{ .group = "JoiningType", .property = "jt" },
+    .{ .group = "LineBreak", .property = "lb" },
+    .{ .group = "NumericType", .property = "nt" },
+    .{ .group = "Scripts", .property = "sc" },
+    .{
+        .group = "ScriptsExtended",
+        .property = "scx",
+        .extra_aliases = &.{
+            "ScriptExtensions",
+        },
+    },
+    .{ .group = "SentenceBreak", .property = "SB" },
+    .{ .group = "VerticalOrientation", .property = "vo" },
+    .{ .group = "WordBreak", .property = "WB" },
 };
 
 /// Escapes bytes for Zig's `@"..."` identifier syntax.
@@ -960,12 +1044,15 @@ test "emitRoots writes generated property roots" {
     defer db.deinit();
 
     try db.addRange("GeneralCategory", "Lu", .{ .first = 0x41, .last = 0x42 });
+    try db.addRange("GraphemeBreak", "Control", .{ .first = 0x00, .last = 0x01 });
     try db.addRange("Age", "V1_1", .{ .first = 0x41, .last = 0x41 });
 
     var aliases = Aliases.init(testing.allocator);
     defer aliases.deinit();
     try aliases.loadPropertyLine("gc ; General_Category");
+    try aliases.loadPropertyLine("GCB ; Grapheme_Cluster_Break");
     try aliases.loadPropertyValueLine("gc ; Lu ; Uppercase_Letter");
+    try aliases.loadPropertyValueLine("GCB ; CN ; Control");
     try aliases.loadPropertyLine("blk ; Block");
     try aliases.loadPropertyValueLine("blk ; ASCII ; Basic_Latin");
 
@@ -979,35 +1066,50 @@ test "emitRoots writes generated property roots" {
 
     const runicode = try tmp.dir.readFileAlloc(testing.io, "runicode.zig", testing.allocator, .limited(4096));
     defer testing.allocator.free(runicode);
+    const sets = try tmp.dir.readFileAlloc(testing.io, "sets.zig", testing.allocator, .limited(4096));
+    defer testing.allocator.free(sets);
+    const codepoints = try tmp.dir.readFileAlloc(testing.io, "codepoints.zig", testing.allocator, .limited(4096));
+    defer testing.allocator.free(codepoints);
     const strs = try tmp.dir.readFileAlloc(testing.io, "strs.zig", testing.allocator, .limited(4096));
     defer testing.allocator.free(strs);
+    const enums = try tmp.dir.readFileAlloc(testing.io, "enums.zig", testing.allocator, .limited(4096));
+    defer testing.allocator.free(enums);
+    const maps = try tmp.dir.readFileAlloc(testing.io, "maps.zig", testing.allocator, .limited(4096));
+    defer testing.allocator.free(maps);
 
     try testing.expect(std.mem.indexOf(u8, runicode, "pub const sets = @import(\"sets.zig\");") != null);
     try testing.expect(std.mem.indexOf(u8, runicode, "pub const maps = @import(\"maps.zig\");") != null);
+    try testing.expect(std.mem.indexOf(u8, runicode, "pub const NamedSetMaps = maps.NamedSetMaps;") != null);
+    try testing.expect(std.mem.indexOf(u8, runicode, "pub const NamedCodepointMaps = maps.NamedCodepointMaps;") != null);
+    try testing.expect(std.mem.indexOf(u8, runicode, "pub const NamedStringMaps = maps.NamedStringMaps;") != null);
+    try testing.expect(std.mem.indexOf(u8, sets, "pub const gc = GeneralCategory;") != null);
+    try testing.expect(std.mem.indexOf(u8, sets, "pub const General_Category = GeneralCategory;") != null);
+    try testing.expect(std.mem.indexOf(u8, sets, "pub const GCB = GraphemeBreak;") != null);
+    try testing.expect(std.mem.indexOf(u8, sets, "pub const gcb = GraphemeBreak;") != null);
+    try testing.expect(std.mem.indexOf(u8, sets, "pub const gbp = GraphemeBreak;") != null);
+    try testing.expect(std.mem.indexOf(u8, sets, "pub const Grapheme_Break_Property = GraphemeBreak;") != null);
+    try testing.expect(std.mem.indexOf(u8, codepoints, "pub const gc = GeneralCategory;") != null);
     try testing.expect(std.mem.indexOf(u8, strs, "pub const GeneralCategory") != null);
+    try testing.expect(std.mem.indexOf(u8, strs, "pub const gbp = GraphemeBreak;") != null);
+    try testing.expect(std.mem.indexOf(u8, enums, "pub const gc = GeneralCategory;") != null);
+    try testing.expect(std.mem.indexOf(u8, maps, "pub const sets = struct {") != null);
+    try testing.expect(std.mem.indexOf(u8, maps, "pub const codepoints = struct {") != null);
+    try testing.expect(std.mem.indexOf(u8, maps, "pub const strings = struct {") != null);
+    try testing.expect(std.mem.indexOf(u8, maps, "pub const GeneralCategory = ucd_tools.NamedMap(@import(\"sets/gencat.zig\"));") != null);
+    try testing.expect(std.mem.indexOf(u8, maps, "pub const GeneralCategory = ucd_tools.NamedMap(@import(\"codepoints/gencat.zig\"));") != null);
+    try testing.expect(std.mem.indexOf(u8, maps, "pub const GeneralCategory = ucd_tools.NamedMap(@import(\"strs/gencat.zig\"));") != null);
+    try testing.expect(std.mem.indexOf(u8, maps, "pub const gc = GeneralCategory;") != null);
+    try testing.expect(std.mem.indexOf(u8, maps, "pub const gbp = GraphemeBreak;") != null);
+    try testing.expect(std.mem.indexOf(u8, maps, "pub const NamedSetMaps = ucd_tools.NamedMap(sets);") != null);
+    try testing.expect(std.mem.indexOf(u8, maps, "pub const NamedCodepointMaps = ucd_tools.NamedMap(codepoints);") != null);
+    try testing.expect(std.mem.indexOf(u8, maps, "pub const NamedStringMaps = ucd_tools.NamedMap(strings);") != null);
+    try testing.expect(std.mem.indexOf(u8, maps, "pub const GeneralCategory = @import(\"maps/gencat.zig\");") == null);
 
     const gencat = try tmp.dir.readFileAlloc(testing.io, "strs/gencat.zig", testing.allocator, .limited(16 * 1024));
     defer testing.allocator.free(gencat);
 
     try testing.expect(std.mem.indexOf(u8, gencat, "pub const Lu = @import(\"gencat/Lu.zig\").Lu;") != null);
     try testing.expect(std.mem.indexOf(u8, gencat, "pub const Uppercase_Letter = Lu;") != null);
-
-    const maps = try tmp.dir.readFileAlloc(testing.io, "maps.zig", testing.allocator, .limited(4096));
-    defer testing.allocator.free(maps);
-
-    try testing.expect(std.mem.indexOf(u8, maps, "pub const GeneralCategory = @import(\"maps/gencat.zig\");") != null);
-    try testing.expect(std.mem.indexOf(u8, maps, "pub const Age") == null);
-
-    const gencat_maps = try tmp.dir.readFileAlloc(testing.io, "maps/gencat.zig", testing.allocator, .limited(4096));
-    defer testing.allocator.free(gencat_maps);
-
-    try testing.expect(std.mem.indexOf(u8, gencat_maps, "const sets = @import(\"../sets/gencat.zig\");") != null);
-    try testing.expect(std.mem.indexOf(u8, gencat_maps, "const codepoints = @import(\"../codepoints/gencat.zig\");") != null);
-    try testing.expect(std.mem.indexOf(u8, gencat_maps, "const strs = @import(\"../strs/gencat.zig\");") != null);
-    try testing.expect(std.mem.indexOf(u8, gencat_maps, "const enums = @import(\"../enums.zig\");") != null);
-    try testing.expect(std.mem.indexOf(u8, gencat_maps, "pub const Sets = ucd_tools.NamedMap(sets);") != null);
-    try testing.expect(std.mem.indexOf(u8, gencat_maps, "pub const Codepoints = ucd_tools.NamedMap(codepoints);") != null);
-    try testing.expect(std.mem.indexOf(u8, gencat_maps, "pub const Strs = ucd_tools.NamedMap(strs);") != null);
 }
 
 // Covers leaf payloads and historical path spelling for the three data views.
@@ -1043,8 +1145,8 @@ test "emitRoots writes literal generated leaves" {
     defer testing.allocator.free(strs_value);
     const sets_value = try tmp.dir.readFileAlloc(testing.io, "sets/blocks/Basic_Latin.zig", testing.allocator, .limited(512 * 1024));
     defer testing.allocator.free(sets_value);
-    const maps_group = try tmp.dir.readFileAlloc(testing.io, "maps/blocks.zig", testing.allocator, .limited(16 * 1024));
-    defer testing.allocator.free(maps_group);
+    const maps_root = try tmp.dir.readFileAlloc(testing.io, "maps.zig", testing.allocator, .limited(16 * 1024));
+    defer testing.allocator.free(maps_root);
 
     try testing.expect(std.mem.indexOf(u8, codepoints_root, "pub const Blocks = @import(\"codepoints/blocks.zig\");") != null);
     try testing.expect(std.mem.indexOf(u8, strs_root, "pub const Blocks = @import(\"strs/blocks.zig\");") != null);
@@ -1056,8 +1158,8 @@ test "emitRoots writes literal generated leaves" {
     try testing.expect(std.mem.indexOf(u8, sets_value, "RuneSet") != null);
     try testing.expect(std.mem.indexOf(u8, sets_value, "/// Length: ") != null);
     try testing.expect(std.mem.indexOf(u8, sets_value, "pub const Basic_Latin") != null);
-    try testing.expect(std.mem.indexOf(u8, maps_group, "const sets = @import(\"../sets/blocks.zig\");") != null);
-    try testing.expect(std.mem.indexOf(u8, maps_group, "pub const Codepoints = ucd_tools.NamedMap(codepoints);") != null);
+    try testing.expect(std.mem.indexOf(u8, maps_root, "pub const Blocks = ucd_tools.NamedMap(@import(\"sets/blocks.zig\"));") != null);
+    try testing.expect(std.mem.indexOf(u8, maps_root, "pub const Blocks = ucd_tools.NamedMap(@import(\"codepoints/blocks.zig\"));") != null);
 }
 
 test "emitGroups and emitRootIndexes split group files from root files" {
@@ -1087,7 +1189,7 @@ test "emitGroups and emitRootIndexes split group files from root files" {
     var group_file = try tmp.dir.openFile(testing.io, "sets/blocks.zig", .{});
     group_file.close(testing.io);
 
-    try emitRootIndexes(testing.allocator, .{ .io = testing.io, .dir = tmp.dir }, groups);
+    try emitRootIndexes(testing.allocator, .{ .io = testing.io, .dir = tmp.dir }, groups, &aliases);
 
     var root_file = try tmp.dir.openFile(testing.io, "sets.zig", .{});
     root_file.close(testing.io);
@@ -1106,7 +1208,10 @@ test "emitRootIndexes sorts unsorted group metadata" {
         .{ .name = "Blocks", .values = &.{} },
     };
 
-    try emitRootIndexes(testing.allocator, .{ .io = testing.io, .dir = tmp.dir }, &groups);
+    var aliases = Aliases.init(testing.allocator);
+    defer aliases.deinit();
+
+    try emitRootIndexes(testing.allocator, .{ .io = testing.io, .dir = tmp.dir }, &groups, &aliases);
 
     const sets = try tmp.dir.readFileAlloc(testing.io, "sets.zig", testing.allocator, .limited(4096));
     defer testing.allocator.free(sets);

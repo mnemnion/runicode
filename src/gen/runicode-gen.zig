@@ -104,7 +104,7 @@ fn runJobs(
 
     const groups = try group_meta.toOwnedSlice(allocator);
     defer emit.freeGroupMeta(allocator, groups);
-    try emit.emitRootIndexes(allocator, .{ .io = io, .dir = out_dir }, groups);
+    try emit.emitRootIndexes(allocator, .{ .io = io, .dir = out_dir }, groups, aliases);
 
     return .{
         .jobs = planned_jobs.len,

@@ -50,6 +50,16 @@ pub fn NamedMap(comptime Source: type) type {
         }
 
         const static_map = std.StaticStringMap(Value).initComptime(pairs);
+        if (Value == type) {
+            return struct {
+                pub fn get(comptime name: []const u8) ?Value {
+                    var buf: [128]u8 = undefined;
+                    const len = normalizePropName(name, &buf) orelse return null;
+                    return static_map.get(buf[0..len]);
+                }
+            };
+        }
+
         return struct {
             buf: [128]u8 = undefined,
 
@@ -686,6 +696,13 @@ const TestStrings = struct {
     pub const Latin_Extended_A = "defgh";
 };
 
+const TestMaps = struct {
+    pub const General_Category = struct {};
+    pub const gc = General_Category;
+    pub const Grapheme_Break_Property = struct {};
+    pub const gbp = Grapheme_Break_Property;
+};
+
 test "NamedMap looks up RuneSets with loose matching" {
     var map = NamedMap(TestSets){};
 
@@ -713,4 +730,11 @@ test "NamedMap looks up string declarations as slices" {
 
     try std.testing.expectEqualStrings(TestStrings.Greek, map.get("Greek") orelse unreachable);
     try std.testing.expectEqualStrings(TestStrings.Latin_Extended_A, map.get("latin extended a") orelse unreachable);
+}
+
+test "NamedMap looks up type declarations at comptime" {
+    const map = NamedMap(TestMaps);
+
+    try std.testing.expectEqual(TestMaps.General_Category, map.get("gc") orelse unreachable);
+    try std.testing.expectEqual(TestMaps.Grapheme_Break_Property, map.get("Grapheme Break Property") orelse unreachable);
 }
