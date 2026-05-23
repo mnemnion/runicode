@@ -1,7 +1,0 @@
-//! Generated source!
-//! Do not modify!
-
-const RuneSet = @import("runeset").RuneSet;
-
-// Length: 25.
-pub const Cyrillic = RuneSet{ .body = &.{ 0x0, 0x0, 0x18406001f0000, 0x16, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffff9f, 0xffffffffffffffff, 0xffffffffffff, 0x34000000000000, 0x80000000000000, 0x6000000, 0x100000000000000, 0x40000000, 0x7, 0xc00000000000, 0xffffffff, 0xffffffffffffffff, 0xffffffff00000000, 0x100000000000000, 0x80000000000, 0x7ff, 0xffff000000000000, 0x3fffffffffff, 0x8000 } };

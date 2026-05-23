@@ -4,7 +4,7 @@ const testing = std.testing;
 const unicoder = @import("unicoder");
 
 const Aliases = @import("aliases.zig").Aliases;
-const Db = @import("db.zig").Db;
+const parse = @import("parse.zig");
 const RuneSet = @import("runeset").RuneSet;
 
 /// Filesystem handles and root filenames used by the emitter.
@@ -49,14 +49,14 @@ pub fn freeGroupMeta(allocator: std.mem.Allocator, groups: []const GroupMeta) vo
 }
 
 /// Writes all generated source files from the loaded UCD database.
-pub fn emitRoots(allocator: std.mem.Allocator, dir: OutputDir, db: *Db, aliases: *const Aliases) !void {
+pub fn emitRoots(allocator: std.mem.Allocator, dir: OutputDir, db: anytype, aliases: *const Aliases) !void {
     const groups = try emitGroups(allocator, dir, db, aliases);
     defer freeGroupMeta(allocator, groups);
     try emitRootIndexes(allocator, dir, groups);
 }
 
 /// Writes per-group generated files and returns metadata for the root pass.
-pub fn emitGroups(allocator: std.mem.Allocator, dir: OutputDir, db: *Db, aliases: *const Aliases) ![]GroupMeta {
+pub fn emitGroups(allocator: std.mem.Allocator, dir: OutputDir, db: anytype, aliases: *const Aliases) ![]GroupMeta {
     return emitGroupsOwned(allocator, allocator, dir, db, aliases);
 }
 
@@ -66,7 +66,7 @@ pub fn emitGroupsOwned(
     scratch_allocator: std.mem.Allocator,
     metadata_allocator: std.mem.Allocator,
     dir: OutputDir,
-    db: *Db,
+    db: anytype,
     aliases: *const Aliases,
 ) ![]GroupMeta {
     const group_names = try sortedGroupNames(scratch_allocator, db);
@@ -94,7 +94,7 @@ pub fn emitRootIndexes(allocator: std.mem.Allocator, dir: OutputDir, groups: []c
     try writeRootFile(dir, dir.runicode_path, writeRunicodeRoot, .{});
 }
 
-fn collectGroupMeta(allocator: std.mem.Allocator, group_names: []const []const u8, db: *Db) ![]GroupMeta {
+fn collectGroupMeta(allocator: std.mem.Allocator, group_names: []const []const u8, db: anytype) ![]GroupMeta {
     const groups = try allocator.alloc(GroupMeta, group_names.len);
     var group_count: usize = 0;
     errdefer {
@@ -141,7 +141,7 @@ fn writeDataGroupFiles(
     allocator: std.mem.Allocator,
     dir: OutputDir,
     group_names: []const []const u8,
-    db: *Db,
+    db: anytype,
     aliases: *const Aliases,
 ) !void {
     try writeSetsGroupFiles(allocator, dir, group_names, db, aliases);
@@ -203,7 +203,7 @@ fn writeStrsGroupFiles(
     allocator: std.mem.Allocator,
     dir: OutputDir,
     group_names: []const []const u8,
-    db: *Db,
+    db: anytype,
     aliases: *const Aliases,
 ) !void {
     try dir.dir.createDirPath(dir.io, "strs");
@@ -267,7 +267,7 @@ fn writeCodepointsGroupFiles(
     allocator: std.mem.Allocator,
     dir: OutputDir,
     group_names: []const []const u8,
-    db: *Db,
+    db: anytype,
     aliases: *const Aliases,
 ) !void {
     try dir.dir.createDirPath(dir.io, "codepoints");
@@ -328,7 +328,7 @@ fn writeSetsGroupFiles(
     allocator: std.mem.Allocator,
     dir: OutputDir,
     group_names: []const []const u8,
-    db: *Db,
+    db: anytype,
     aliases: *const Aliases,
 ) !void {
     try dir.dir.createDirPath(dir.io, "sets");
@@ -727,7 +727,7 @@ fn pathName(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
 }
 
 /// Returns DB group names in deterministic order.
-fn sortedGroupNames(allocator: std.mem.Allocator, db: *Db) ![][]const u8 {
+fn sortedGroupNames(allocator: std.mem.Allocator, db: anytype) ![][]const u8 {
     var names = try allocator.alloc([]const u8, db.groups.count());
     var it = db.groups.iterator();
     var idx: usize = 0;
@@ -828,6 +828,127 @@ const header_txt =
     \\
     \\
 ;
+
+const Db = struct {
+    allocator: std.mem.Allocator,
+    groups: std.StringHashMapUnmanaged(PropertyGroup) = .empty,
+
+    fn init(allocator: std.mem.Allocator) Db {
+        return .{ .allocator = allocator };
+    }
+
+    fn deinit(db: *Db) void {
+        var it = db.groups.iterator();
+        while (it.next()) |entry| {
+            db.allocator.free(entry.key_ptr.*);
+            entry.value_ptr.deinit();
+        }
+        db.groups.deinit(db.allocator);
+    }
+
+    fn property(db: *Db, name: []const u8) ?*PropertyGroup {
+        return db.groups.getPtr(name);
+    }
+
+    fn addRange(db: *Db, property_name: []const u8, value_name: []const u8, range: parse.Range) !void {
+        try db.addRanges(property_name, value_name, &.{range});
+    }
+
+    fn addRanges(db: *Db, property_name: []const u8, value_name: []const u8, ranges: []const parse.Range) !void {
+        if (ranges.len == 0) return error.EmptyRangeSet;
+
+        const group = try db.getOrPutProperty(property_name);
+        const prop_value = try group.getOrPutValue(value_name);
+        try prop_value.ranges.appendSlice(db.allocator, ranges);
+    }
+
+    fn finalizeRuneSets(db: *Db) !void {
+        var group_it = db.groups.iterator();
+        while (group_it.next()) |group_entry| {
+            var value_it = group_entry.value_ptr.values.iterator();
+            while (value_it.next()) |value_entry| {
+                const value = value_entry.value_ptr;
+                if (value.rune_set != null) return error.RuneSetAlreadyFinalized;
+                if (value.ranges.items.len == 0) return error.EmptyRangeSet;
+                value.rune_set = try createRuneSetFromRanges(value.ranges.items, db.allocator);
+            }
+        }
+    }
+
+    fn getOrPutProperty(db: *Db, name: []const u8) !*PropertyGroup {
+        const owned_name = try db.allocator.dupe(u8, name);
+        errdefer db.allocator.free(owned_name);
+
+        const result = try db.groups.getOrPut(db.allocator, owned_name);
+        if (result.found_existing) {
+            db.allocator.free(owned_name);
+        } else {
+            result.value_ptr.* = PropertyGroup.init(db.allocator);
+        }
+        return result.value_ptr;
+    }
+};
+
+const PropertyGroup = struct {
+    allocator: std.mem.Allocator,
+    values: std.StringHashMapUnmanaged(PropertyValue) = .empty,
+
+    fn init(allocator: std.mem.Allocator) PropertyGroup {
+        return .{ .allocator = allocator };
+    }
+
+    fn deinit(group: *PropertyGroup) void {
+        var it = group.values.iterator();
+        while (it.next()) |entry| {
+            group.allocator.free(entry.key_ptr.*);
+            entry.value_ptr.deinit(group.allocator);
+        }
+        group.values.deinit(group.allocator);
+    }
+
+    fn value(group: *PropertyGroup, name: []const u8) ?*PropertyValue {
+        return group.values.getPtr(name);
+    }
+
+    fn getOrPutValue(group: *PropertyGroup, name: []const u8) !*PropertyValue {
+        const owned_name = try group.allocator.dupe(u8, name);
+        errdefer group.allocator.free(owned_name);
+
+        const result = try group.values.getOrPut(group.allocator, owned_name);
+        if (result.found_existing) {
+            group.allocator.free(owned_name);
+        } else {
+            result.value_ptr.* = .{};
+        }
+        return result.value_ptr;
+    }
+};
+
+const PropertyValue = struct {
+    ranges: std.ArrayList(parse.Range) = .empty,
+    rune_set: ?RuneSet = null,
+
+    fn deinit(value: *PropertyValue, allocator: std.mem.Allocator) void {
+        value.ranges.deinit(allocator);
+        if (value.rune_set) |set| set.deinit(allocator);
+    }
+};
+
+fn createRuneSetFromRanges(ranges: []const parse.Range, allocator: std.mem.Allocator) !RuneSet {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
+
+    for (ranges) |range| {
+        var codepoint = range.first;
+        while (codepoint <= range.last) : (codepoint += 1) {
+            var buf: [4]u8 = undefined;
+            const len = try unicoder.codepoint.toWtf8(codepoint, &buf);
+            try bytes.appendSlice(allocator, buf[0..len]);
+        }
+    }
+
+    return try RuneSet.createFromMutableString(bytes.items, allocator);
+}
 
 // Covers the generated root graph and alias forwarding without needing the full
 // UCD corpus.

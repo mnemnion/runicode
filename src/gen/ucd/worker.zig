@@ -2,15 +2,139 @@ const std = @import("std");
 const testing = std.testing;
 
 const alias_data = @import("aliases.zig");
-const db_data = @import("db.zig");
 const emit = @import("emit.zig");
 const jobs_data = @import("jobs.zig");
 const manifest = @import("manifest.zig");
 const parse = @import("parse.zig");
+const unicoder = @import("unicoder");
+const RuneSet = @import("runeset").RuneSet;
 
 const Aliases = alias_data.Aliases;
-const Db = db_data.Db;
-const PropertyGroup = db_data.PropertyGroup;
+
+pub const PropertyValue = struct {
+    pub const empty: PropertyValue = .{};
+
+    pub const RangeList = std.ArrayList(parse.Range);
+
+    ranges: RangeList = .empty,
+    rune_set: ?RuneSet = null,
+
+    fn deinit(value: *PropertyValue, allocator: std.mem.Allocator) void {
+        value.ranges.deinit(allocator);
+        if (value.rune_set) |set| set.deinit(allocator);
+    }
+};
+
+pub const PropertyGroup = struct {
+    allocator: std.mem.Allocator,
+    values: std.StringHashMapUnmanaged(PropertyValue) = .empty,
+
+    fn init(allocator: std.mem.Allocator) PropertyGroup {
+        return .{ .allocator = allocator };
+    }
+
+    fn deinit(group: *PropertyGroup) void {
+        var it = group.values.iterator();
+        while (it.next()) |entry| {
+            group.allocator.free(entry.key_ptr.*);
+            entry.value_ptr.deinit(group.allocator);
+        }
+        group.values.deinit(group.allocator);
+    }
+
+    pub fn value(group: *PropertyGroup, name: []const u8) ?*PropertyValue {
+        return group.values.getPtr(name);
+    }
+
+    fn getOrPutValue(group: *PropertyGroup, name: []const u8) !*PropertyValue {
+        const owned_name = try group.allocator.dupe(u8, name);
+        errdefer group.allocator.free(owned_name);
+
+        const result = try group.values.getOrPut(group.allocator, owned_name);
+        if (result.found_existing) {
+            group.allocator.free(owned_name);
+        } else {
+            result.value_ptr.* = .{};
+        }
+        return result.value_ptr;
+    }
+};
+
+pub const Db = struct {
+    allocator: std.mem.Allocator,
+    groups: std.StringHashMapUnmanaged(PropertyGroup) = .empty,
+
+    fn init(allocator: std.mem.Allocator) Db {
+        return .{ .allocator = allocator };
+    }
+
+    fn deinit(db: *Db) void {
+        var it = db.groups.iterator();
+        while (it.next()) |entry| {
+            db.allocator.free(entry.key_ptr.*);
+            entry.value_ptr.deinit();
+        }
+        db.groups.deinit(db.allocator);
+    }
+
+    pub fn property(db: *Db, name: []const u8) ?*PropertyGroup {
+        return db.groups.getPtr(name);
+    }
+
+    fn addRange(db: *Db, property_name: []const u8, value_name: []const u8, range: parse.Range) !void {
+        try db.addRanges(property_name, value_name, &.{range});
+    }
+
+    fn addRanges(db: *Db, property_name: []const u8, value_name: []const u8, ranges: []const parse.Range) !void {
+        if (ranges.len == 0) return error.EmptyRangeSet;
+
+        const group = try db.getOrPutProperty(property_name);
+        const prop_value = try group.getOrPutValue(value_name);
+        try prop_value.ranges.appendSlice(db.allocator, ranges);
+    }
+
+    fn finalizeRuneSets(db: *Db) !void {
+        var group_it = db.groups.iterator();
+        while (group_it.next()) |group_entry| {
+            var value_it = group_entry.value_ptr.values.iterator();
+            while (value_it.next()) |value_entry| {
+                const value = value_entry.value_ptr;
+                if (value.rune_set != null) return error.RuneSetAlreadyFinalized;
+                if (value.ranges.items.len == 0) return error.EmptyRangeSet;
+                value.rune_set = try createRuneSetFromRanges(value.ranges.items, db.allocator);
+            }
+        }
+    }
+
+    fn getOrPutProperty(db: *Db, name: []const u8) !*PropertyGroup {
+        const owned_name = try db.allocator.dupe(u8, name);
+        errdefer db.allocator.free(owned_name);
+
+        const result = try db.groups.getOrPut(db.allocator, owned_name);
+        if (result.found_existing) {
+            db.allocator.free(owned_name);
+        } else {
+            result.value_ptr.* = PropertyGroup.init(db.allocator);
+        }
+        return result.value_ptr;
+    }
+};
+
+fn createRuneSetFromRanges(ranges: []const parse.Range, allocator: std.mem.Allocator) !RuneSet {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
+
+    for (ranges) |range| {
+        var codepoint = range.first;
+        while (codepoint <= range.last) : (codepoint += 1) {
+            var buf: [4]u8 = undefined;
+            const len = try unicoder.codepoint.toWtf8(codepoint, &buf);
+            try bytes.appendSlice(allocator, buf[0..len]);
+        }
+    }
+
+    return try RuneSet.createFromMutableString(bytes.items, allocator);
+}
 
 pub const WorkerStats = struct {
     groups: []const emit.GroupMeta,

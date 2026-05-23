@@ -1,7 +1,0 @@
-//! Generated source!
-//! Do not modify!
-
-const RuneSet = @import("runeset").RuneSet;
-
-// Length: 23.
-pub const Hiragana = RuneSet{ .body = &.{ 0x0, 0x0, 0x1800800000000, 0x10, 0xf, 0x6200000000000000, 0x88000000, 0x100, 0x3f, 0xc0000000, 0x1003e00000000, 0x60, 0x1800000000000000, 0x1fe7fffff, 0xfffffffffffffffe, 0x30bf0000fffbff0e, 0x1, 0xfffffffffffffffe, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0x40000ffffffff, 0x70000 } };
