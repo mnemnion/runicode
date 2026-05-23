@@ -62,6 +62,35 @@ pub fn fields(allocator: std.mem.Allocator, line: []const u8) !FieldList {
     return .{ .items = try list.toOwnedSlice(allocator) };
 }
 
+pub fn fieldsBounded(line: []const u8, storage: [][]const u8) ![]const []const u8 {
+    const uncommented = if (std.mem.indexOfScalar(u8, line, '#')) |hash| line[0..hash] else line;
+    const trimmed = std.mem.trim(u8, uncommented, " \t\r\n");
+    if (trimmed.len == 0) return storage[0..0];
+
+    var count: usize = 0;
+    var it = std.mem.splitScalar(u8, trimmed, ';');
+    while (it.next()) |field| {
+        if (count == storage.len) return error.TooManyFields;
+        storage[count] = std.mem.trim(u8, field, " \t\r\n");
+        count += 1;
+    }
+    return storage[0..count];
+}
+
+test "fieldsBounded parses into caller-owned storage" {
+    var storage: [2][]const u8 = undefined;
+    const parsed = try fieldsBounded("0041 ; Lu # comment", &storage);
+
+    try testing.expectEqual(@as(usize, 2), parsed.len);
+    try testing.expectEqualStrings("0041", parsed[0]);
+    try testing.expectEqualStrings("Lu", parsed[1]);
+}
+
+test "fieldsBounded reports too many fields" {
+    var storage: [2][]const u8 = undefined;
+    try testing.expectError(error.TooManyFields, fieldsBounded("a; b; c", &storage));
+}
+
 test "parse codepoint parses hex scalar" {
     try testing.expectEqual(@as(u21, 0x1F600), try parseCodepoint("1F600"));
 }

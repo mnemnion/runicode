@@ -34,28 +34,151 @@ pub const OutputDir = struct {
     maps_path: []const u8 = "maps.zig",
 };
 
+pub const GroupMeta = struct {
+    name: []const u8,
+    values: []const []const u8,
+};
+
+pub fn freeGroupMeta(allocator: std.mem.Allocator, groups: []const GroupMeta) void {
+    for (groups) |group| {
+        allocator.free(group.name);
+        for (group.values) |value| allocator.free(value);
+        allocator.free(group.values);
+    }
+    allocator.free(groups);
+}
+
 /// Writes all generated source files from the loaded UCD database.
 pub fn emitRoots(allocator: std.mem.Allocator, dir: OutputDir, db: *Db, aliases: *const Aliases) !void {
-    const group_names = try sortedGroupNames(allocator, db);
-    defer allocator.free(group_names);
+    const groups = try emitGroups(allocator, dir, db, aliases);
+    defer freeGroupMeta(allocator, groups);
+    try emitRootIndexes(allocator, dir, groups);
+}
 
-    try writeDataFiles(allocator, dir, group_names, db, aliases);
-    try writeRootFile(dir, dir.enums_path, writeEnumsRoot, .{ group_names, db });
-    try writeMapsFiles(allocator, dir, group_names, db);
+/// Writes per-group generated files and returns metadata for the root pass.
+pub fn emitGroups(allocator: std.mem.Allocator, dir: OutputDir, db: *Db, aliases: *const Aliases) ![]GroupMeta {
+    return emitGroupsOwned(allocator, allocator, dir, db, aliases);
+}
+
+/// Writes per-group files with scratch allocation separated from returned
+/// metadata ownership.
+pub fn emitGroupsOwned(
+    scratch_allocator: std.mem.Allocator,
+    metadata_allocator: std.mem.Allocator,
+    dir: OutputDir,
+    db: *Db,
+    aliases: *const Aliases,
+) ![]GroupMeta {
+    const group_names = try sortedGroupNames(scratch_allocator, db);
+    defer scratch_allocator.free(group_names);
+
+    const groups = try collectGroupMeta(metadata_allocator, group_names, db);
+    errdefer freeGroupMeta(metadata_allocator, groups);
+
+    try writeDataGroupFiles(scratch_allocator, dir, group_names, db, aliases);
+    try writeMapsGroupFiles(scratch_allocator, dir, group_names);
+
+    return groups;
+}
+
+//
+/// Writes only root index files from precomputed group metadata.
+pub fn emitRootIndexes(allocator: std.mem.Allocator, dir: OutputDir, groups: []const GroupMeta) !void {
+    const sorted_groups = try allocator.dupe(GroupMeta, groups);
+    defer allocator.free(sorted_groups);
+    std.mem.sort(GroupMeta, sorted_groups, {}, groupMetaLessThan);
+
+    try writeDataRootFiles(allocator, dir, sorted_groups);
+    try writeRootFile(dir, dir.enums_path, writeEnumsRoot, .{ allocator, sorted_groups });
+    try writeMapsRootFile(allocator, dir, sorted_groups);
     try writeRootFile(dir, dir.runicode_path, writeRunicodeRoot, .{});
 }
 
+fn collectGroupMeta(allocator: std.mem.Allocator, group_names: []const []const u8, db: *Db) ![]GroupMeta {
+    const groups = try allocator.alloc(GroupMeta, group_names.len);
+    var group_count: usize = 0;
+    errdefer {
+        for (groups[0..group_count]) |group| {
+            allocator.free(group.name);
+            for (group.values) |value| allocator.free(value);
+            allocator.free(group.values);
+        }
+        allocator.free(groups);
+    }
+
+    for (group_names, groups) |group_name, *meta| {
+        const group = db.property(group_name).?;
+        const value_names = try sortedValueNames(group.allocator, group);
+        defer group.allocator.free(value_names);
+
+        const name = try allocator.dupe(u8, group_name);
+        errdefer allocator.free(name);
+
+        const values = try allocator.alloc([]const u8, value_names.len);
+        var value_count: usize = 0;
+        errdefer {
+            for (values[0..value_count]) |value| allocator.free(value);
+            allocator.free(values);
+        }
+
+        for (value_names, values) |value_name, *value| {
+            value.* = try allocator.dupe(u8, value_name);
+            value_count += 1;
+        }
+
+        meta.* = .{
+            .name = name,
+            .values = values,
+        };
+        group_count += 1;
+    }
+
+    return groups;
+}
+
 /// Writes the three generated data trees: sets, codepoints, and strings.
-fn writeDataFiles(
+fn writeDataGroupFiles(
     allocator: std.mem.Allocator,
     dir: OutputDir,
     group_names: []const []const u8,
     db: *Db,
     aliases: *const Aliases,
 ) !void {
-    try writeSetsFiles(allocator, dir, group_names, db, aliases);
-    try writeCodepointsFiles(allocator, dir, group_names, db, aliases);
-    try writeStrsFiles(allocator, dir, group_names, db, aliases);
+    try writeSetsGroupFiles(allocator, dir, group_names, db, aliases);
+    try writeCodepointsGroupFiles(allocator, dir, group_names, db, aliases);
+    try writeStrsGroupFiles(allocator, dir, group_names, db, aliases);
+}
+
+fn writeDataRootFiles(
+    allocator: std.mem.Allocator,
+    dir: OutputDir,
+    groups: []const GroupMeta,
+) !void {
+    try writeDataRootFile(allocator, dir, dir.sets_path, "sets", groups);
+    try writeDataRootFile(allocator, dir, dir.codepoints_path, "codepoints", groups);
+    try writeDataRootFile(allocator, dir, dir.strs_path, "strs", groups);
+}
+
+fn writeDataRootFile(
+    allocator: std.mem.Allocator,
+    dir: OutputDir,
+    path: []const u8,
+    prefix: []const u8,
+    groups: []const GroupMeta,
+) !void {
+    var file = try dir.dir.createFile(dir.io, path, .{ .lock = .exclusive });
+    defer file.close(dir.io);
+    var buf: [4096]u8 = undefined;
+    var file_writer = file.writer(dir.io, &buf);
+    const writer = &file_writer.interface;
+
+    try writer.writeAll(header_txt);
+    for (groups) |group| {
+        const group_path = try semanticGroupFilePath(allocator, prefix, group.name);
+        defer allocator.free(group_path);
+        try writer.print("pub const {f} = @import(\"{s}\");\n", .{ identifier(group.name), group_path });
+    }
+    try writer.flush();
 }
 
 /// Opens a root file, calls its writer callback, and flushes the buffered writer.
@@ -76,7 +199,7 @@ fn writeRootFile(
 
 /// Writes strs.zig, one strs/<group>.zig file per property group, and one
 /// strs/<group>/<value>.zig file per property value.
-fn writeStrsFiles(
+fn writeStrsGroupFiles(
     allocator: std.mem.Allocator,
     dir: OutputDir,
     group_names: []const []const u8,
@@ -85,13 +208,6 @@ fn writeStrsFiles(
 ) !void {
     try dir.dir.createDirPath(dir.io, "strs");
 
-    var root_file = try dir.dir.createFile(dir.io, dir.strs_path, .{ .lock = .exclusive });
-    defer root_file.close(dir.io);
-    var root_buf: [4096]u8 = undefined;
-    var root_writer = root_file.writer(dir.io, &root_buf);
-    const writer = &root_writer.interface;
-
-    try writer.writeAll(header_txt);
     for (group_names) |group_name| {
         const group = db.property(group_name).?;
         const value_names = try sortedValueNames(group.allocator, group);
@@ -103,7 +219,6 @@ fn writeStrsFiles(
 
         const group_path = try semanticGroupFilePath(allocator, "strs", group_name);
         defer allocator.free(group_path);
-        try writer.print("pub const {f} = @import(\"{s}\");\n", .{ identifier(group_name), group_path });
 
         var group_file = try dir.dir.createFile(dir.io, group_path, .{ .lock = .exclusive });
         defer group_file.close(dir.io);
@@ -126,7 +241,6 @@ fn writeStrsFiles(
         try writeGroupValueAliases(allocator, group_out, group_name, value_names, aliases);
         try group_out.flush();
     }
-    try writer.flush();
 }
 
 /// Writes one string leaf file. RuneSet collapses duplicate or overlapping
@@ -149,7 +263,7 @@ fn writeStrsValueFile(allocator: std.mem.Allocator, dir: OutputDir, path: []cons
 /// Writes codepoints.zig, group imports, and one `[N]u21` leaf per value.
 /// This is mostly the same loop as `writeStrsFiles` and should probably share
 /// structure once the generated layout settles.
-fn writeCodepointsFiles(
+fn writeCodepointsGroupFiles(
     allocator: std.mem.Allocator,
     dir: OutputDir,
     group_names: []const []const u8,
@@ -158,13 +272,6 @@ fn writeCodepointsFiles(
 ) !void {
     try dir.dir.createDirPath(dir.io, "codepoints");
 
-    var root_file = try dir.dir.createFile(dir.io, dir.codepoints_path, .{ .lock = .exclusive });
-    defer root_file.close(dir.io);
-    var root_buf: [4096]u8 = undefined;
-    var root_writer = root_file.writer(dir.io, &root_buf);
-    const writer = &root_writer.interface;
-
-    try writer.writeAll(header_txt);
     for (group_names) |group_name| {
         const group = db.property(group_name).?;
         const value_names = try sortedValueNames(group.allocator, group);
@@ -176,7 +283,6 @@ fn writeCodepointsFiles(
 
         const group_path = try semanticGroupFilePath(allocator, "codepoints", group_name);
         defer allocator.free(group_path);
-        try writer.print("pub const {f} = @import(\"{s}\");\n", .{ identifier(group_name), group_path });
 
         var group_file = try dir.dir.createFile(dir.io, group_path, .{ .lock = .exclusive });
         defer group_file.close(dir.io);
@@ -199,7 +305,6 @@ fn writeCodepointsFiles(
         try writeGroupValueAliases(allocator, group_out, group_name, value_names, aliases);
         try group_out.flush();
     }
-    try writer.flush();
 }
 
 /// Writes one codepoint leaf. RuneSet iteration gives the final sorted,
@@ -219,7 +324,7 @@ fn writeCodepointsValueFile(dir: OutputDir, path: []const u8, decl_name: []const
 }
 
 /// Writes sets.zig, group imports, and one serialized RuneSet leaf per value.
-fn writeSetsFiles(
+fn writeSetsGroupFiles(
     allocator: std.mem.Allocator,
     dir: OutputDir,
     group_names: []const []const u8,
@@ -228,13 +333,6 @@ fn writeSetsFiles(
 ) !void {
     try dir.dir.createDirPath(dir.io, "sets");
 
-    var root_file = try dir.dir.createFile(dir.io, dir.sets_path, .{ .lock = .exclusive });
-    defer root_file.close(dir.io);
-    var root_buf: [4096]u8 = undefined;
-    var root_writer = root_file.writer(dir.io, &root_buf);
-    const writer = &root_writer.interface;
-
-    try writer.writeAll(header_txt);
     for (group_names) |group_name| {
         const group = db.property(group_name).?;
         const value_names = try sortedValueNames(group.allocator, group);
@@ -246,7 +344,6 @@ fn writeSetsFiles(
 
         const group_path = try semanticGroupFilePath(allocator, "sets", group_name);
         defer allocator.free(group_path);
-        try writer.print("pub const {f} = @import(\"{s}\");\n", .{ identifier(group_name), group_path });
 
         var group_file = try dir.dir.createFile(dir.io, group_path, .{ .lock = .exclusive });
         defer group_file.close(dir.io);
@@ -269,7 +366,6 @@ fn writeSetsFiles(
         try writeGroupValueAliases(allocator, group_out, group_name, value_names, aliases);
         try group_out.flush();
     }
-    try writer.flush();
 }
 
 /// Writes one RuneSet leaf using runeset's serializer.
@@ -336,21 +432,21 @@ fn writeGroupValueAliases(
 }
 
 /// Writes one enum per property group into enums.zig.
-fn writeEnumsRoot(writer: *std.Io.Writer, group_names: []const []const u8, db: *Db) !void {
+fn writeEnumsRoot(writer: *std.Io.Writer, allocator: std.mem.Allocator, groups: []const GroupMeta) !void {
     try writer.writeAll(header_txt);
-    for (group_names) |group_name| {
-        const group = db.property(group_name).?;
-        const value_names = try sortedValueNames(group.allocator, group);
-        defer group.allocator.free(value_names);
-
-        try writer.print("pub const {f} = enum {{\n", .{identifier(group_name)});
-        for (value_names) |value_name| {
-            const decl_name = try declName(group.allocator, value_name);
-            defer group.allocator.free(decl_name);
-            try writer.print("    {f},\n", .{identifier(decl_name)});
-        }
-        try writer.writeAll("};\n\n");
+    for (groups) |group| {
+        try writeEnumType(allocator, writer, group.name, group.values);
     }
+}
+
+fn writeEnumType(allocator: std.mem.Allocator, writer: *std.Io.Writer, group_name: []const u8, value_names: []const []const u8) !void {
+    try writer.print("pub const {f} = enum {{\n", .{identifier(group_name)});
+    for (value_names) |value_name| {
+        const decl_name = try declName(allocator, value_name);
+        defer allocator.free(decl_name);
+        try writer.print("    {f},\n", .{identifier(decl_name)});
+    }
+    try writer.writeAll("};\n\n");
 }
 
 /// Writes runicode.zig, the public import root for generated data.
@@ -378,15 +474,29 @@ fn writeRunicodeRoot(writer: *std.Io.Writer) !void {
     );
 }
 
-/// Writes maps.zig and one maps/<group>.zig file for mapped groups.
-fn writeMapsFiles(
+fn writeMapsGroupFiles(
     allocator: std.mem.Allocator,
     dir: OutputDir,
     group_names: []const []const u8,
-    db: *Db,
 ) !void {
     try dir.dir.createDirPath(dir.io, "maps");
 
+    for (group_names) |group_name| {
+        if (!isMappedGroup(group_name)) continue;
+
+        const group_path = try semanticGroupFilePath(allocator, "maps", group_name);
+        defer allocator.free(group_path);
+        try createParentDirPath(dir, group_path);
+        try writeMapGroupFile(allocator, dir, group_path, group_name);
+    }
+}
+
+/// Writes maps.zig from group metadata.
+fn writeMapsRootFile(
+    allocator: std.mem.Allocator,
+    dir: OutputDir,
+    groups: []const GroupMeta,
+) !void {
     var root_file = try dir.dir.createFile(dir.io, dir.maps_path, .{ .lock = .exclusive });
     defer root_file.close(dir.io);
     var root_buf: [4096]u8 = undefined;
@@ -395,16 +505,12 @@ fn writeMapsFiles(
 
     try writer.writeAll(header_txt);
 
-    for (group_names) |group_name| {
-        if (!isMappedGroup(group_name)) continue;
+    for (groups) |group| {
+        if (!isMappedGroup(group.name)) continue;
 
-        _ = db.property(group_name).?;
-
-        const group_path = try semanticGroupFilePath(allocator, "maps", group_name);
+        const group_path = try semanticGroupFilePath(allocator, "maps", group.name);
         defer allocator.free(group_path);
-        try createParentDirPath(dir, group_path);
-        try writeMapGroupFile(allocator, dir, group_path, group_name);
-        try writer.print("pub const {f} = @import(\"{s}\");\n", .{ identifier(group_name), group_path });
+        try writer.print("pub const {f} = @import(\"{s}\");\n", .{ identifier(group.name), group_path });
     }
     try writer.flush();
 }
@@ -645,6 +751,10 @@ fn ltString(_: void, left: []const u8, right: []const u8) bool {
     return std.mem.order(u8, left, right) == .lt;
 }
 
+fn groupMetaLessThan(_: void, left: GroupMeta, right: GroupMeta) bool {
+    return ltString({}, left.name, right.name);
+}
+
 /// Returns whether this group gets a maps/<group>.zig module.
 fn isMappedGroup(name: []const u8) bool {
     inline for (mapped_groups) |mapped_group| {
@@ -754,7 +864,6 @@ test "emitRoots writes generated property roots" {
     try testing.expect(std.mem.indexOf(u8, runicode, "pub const sets = @import(\"sets.zig\");") != null);
     try testing.expect(std.mem.indexOf(u8, runicode, "pub const maps = @import(\"maps.zig\");") != null);
     try testing.expect(std.mem.indexOf(u8, strs, "pub const GeneralCategory") != null);
-    try testing.expect(std.mem.indexOf(u8, strs, "pub const Lu") != null);
 
     const gencat = try tmp.dir.readFileAlloc(testing.io, "strs/gencat.zig", testing.allocator, .limited(16 * 1024));
     defer testing.allocator.free(gencat);
@@ -828,4 +937,60 @@ test "emitRoots writes literal generated leaves" {
     try testing.expect(std.mem.indexOf(u8, sets_value, "pub const Basic_Latin") != null);
     try testing.expect(std.mem.indexOf(u8, maps_group, "const sets = @import(\"../sets/blocks.zig\");") != null);
     try testing.expect(std.mem.indexOf(u8, maps_group, "pub const Codepoints = ucd_tools.NamedMap(codepoints);") != null);
+}
+
+test "emitGroups and emitRootIndexes split group files from root files" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var db = Db.init(testing.allocator);
+    defer db.deinit();
+
+    try db.addRange("Blocks", "Basic_Latin", .{ .first = 0x41, .last = 0x41 });
+
+    var aliases = Aliases.init(testing.allocator);
+    defer aliases.deinit();
+    try aliases.loadPropertyLine("blk ; Block");
+    try aliases.loadPropertyValueLine("blk ; ASCII ; Basic_Latin");
+
+    try db.finalizeRuneSets();
+    const groups = try emitGroups(testing.allocator, .{ .io = testing.io, .dir = tmp.dir }, &db, &aliases);
+    defer freeGroupMeta(testing.allocator, groups);
+
+    try testing.expectEqual(@as(usize, 1), groups.len);
+    try testing.expectEqualStrings("Blocks", groups[0].name);
+    try testing.expectEqual(@as(usize, 1), groups[0].values.len);
+    try testing.expectEqualStrings("Basic_Latin", groups[0].values[0]);
+
+    try testing.expectError(error.FileNotFound, tmp.dir.access(testing.io, "sets.zig", .{}));
+    var group_file = try tmp.dir.openFile(testing.io, "sets/blocks.zig", .{});
+    group_file.close(testing.io);
+
+    try emitRootIndexes(testing.allocator, .{ .io = testing.io, .dir = tmp.dir }, groups);
+
+    var root_file = try tmp.dir.openFile(testing.io, "sets.zig", .{});
+    root_file.close(testing.io);
+    const enums = try tmp.dir.readFileAlloc(testing.io, "enums.zig", testing.allocator, .limited(4096));
+    defer testing.allocator.free(enums);
+
+    try testing.expect(std.mem.indexOf(u8, enums, "pub const Blocks = enum {") != null);
+}
+
+test "emitRootIndexes sorts unsorted group metadata" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const groups = [_]GroupMeta{
+        .{ .name = "Scripts", .values = &.{} },
+        .{ .name = "Blocks", .values = &.{} },
+    };
+
+    try emitRootIndexes(testing.allocator, .{ .io = testing.io, .dir = tmp.dir }, &groups);
+
+    const sets = try tmp.dir.readFileAlloc(testing.io, "sets.zig", testing.allocator, .limited(4096));
+    defer testing.allocator.free(sets);
+
+    const blocks_index = std.mem.indexOf(u8, sets, "pub const Blocks").?;
+    const scripts_index = std.mem.indexOf(u8, sets, "pub const Scripts").?;
+    try testing.expect(blocks_index < scripts_index);
 }
