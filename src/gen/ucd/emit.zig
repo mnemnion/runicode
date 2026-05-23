@@ -149,6 +149,7 @@ fn writeDataGroupFiles(
     aliases: *const Aliases,
 ) !void {
     try writeSetsGroupFiles(allocator, dir, group_names, db, aliases);
+    try writeSupremumSetFile(allocator, dir, db);
     try writeCodepointsGroupFiles(allocator, dir, group_names, db, aliases);
     try writeStrsGroupFiles(allocator, dir, group_names, db, aliases);
 }
@@ -183,6 +184,9 @@ fn writeDataRootFile(
         const group_path = try semanticGroupFilePath(allocator, prefix, group.name);
         defer allocator.free(group_path);
         try writer.print("pub const {f} = @import(\"{s}\");\n", .{ identifier(group.name), group_path });
+    }
+    if (std.mem.eql(u8, prefix, "sets") and hasGroup(groups, "GeneralCategory")) {
+        try writer.writeAll("pub const Supremum = @import(\"sets/Supremum.zig\").Supremum;\n");
     }
     try writeRootGroupAliases(allocator, writer, groups, aliases, "");
     try writer.flush();
@@ -388,6 +392,24 @@ fn writeSetsValueFile(dir: OutputDir, path: []const u8, decl_name: []const u8, r
     try writer.print("/// Length: {d} words.\n", .{rune_set.body.len});
     try rune_set.serialize(writer, .public, decl_name);
     try writer.flush();
+}
+
+fn writeSupremumSetFile(allocator: std.mem.Allocator, dir: OutputDir, db: anytype) !void {
+    const group = db.property("GeneralCategory") orelse return;
+
+    var ranges: std.ArrayList(parse.Range) = .empty;
+    defer ranges.deinit(allocator);
+
+    var it = group.values.iterator();
+    while (it.next()) |entry| {
+        if (isSupremumExcludedCategory(entry.key_ptr.*)) continue;
+        try ranges.appendSlice(allocator, entry.value_ptr.ranges.items);
+    }
+    if (ranges.items.len == 0) return;
+
+    const supremum = try createRuneSetFromRanges(ranges.items, allocator);
+    defer supremum.deinit(allocator);
+    try writeSetsValueFile(dir, "sets/Supremum.zig", "Supremum", supremum);
 }
 
 /// Adds `pub const Alias = Canonical;` declarations to a group root. `seen_decls`
@@ -634,6 +656,13 @@ fn rootAliasGroup(group_name: []const u8) ?RootAliasGroup {
     return null;
 }
 
+fn hasGroup(groups: []const GroupMeta, name: []const u8) bool {
+    for (groups) |group| {
+        if (std.mem.eql(u8, group.name, name)) return true;
+    }
+    return false;
+}
+
 /// Frees copied keys stored in temporary string maps.
 fn freeSeenMatches(allocator: std.mem.Allocator, seen_matches: *std.StringHashMapUnmanaged(void)) void {
     var it = seen_matches.keyIterator();
@@ -859,6 +888,38 @@ const root_alias_groups = [_]RootAliasGroup{
     .{ .group = "WordBreak", .property = "WB" },
 };
 
+fn isSupremumExcludedCategory(value_name: []const u8) bool {
+    inline for (supremum_excluded_categories) |excluded| {
+        if (std.mem.eql(u8, value_name, excluded)) return true;
+    }
+    return false;
+}
+
+const supremum_excluded_categories = [_][]const u8{
+    "Cn",
+    "Co",
+    "Cs",
+    "Unassigned",
+    "Private_Use",
+    "Surrogate",
+    "C",
+    "L",
+    "LC",
+    "M",
+    "N",
+    "P",
+    "S",
+    "Z",
+    "Other",
+    "Letter",
+    "Cased_Letter",
+    "Mark",
+    "Number",
+    "Punctuation",
+    "Symbol",
+    "Separator",
+};
+
 /// Escapes bytes for Zig's `@"..."` identifier syntax.
 fn writeEscapedBytes(writer: *std.Io.Writer, bytes: []const u8) !void {
     for (bytes) |byte| {
@@ -1044,6 +1105,9 @@ test "emitRoots writes generated property roots" {
     defer db.deinit();
 
     try db.addRange("GeneralCategory", "Lu", .{ .first = 0x41, .last = 0x42 });
+    try db.addRange("GeneralCategory", "Cn", .{ .first = 0x43, .last = 0x43 });
+    try db.addRange("GeneralCategory", "Co", .{ .first = 0x44, .last = 0x44 });
+    try db.addRange("GeneralCategory", "Cs", .{ .first = 0x45, .last = 0x45 });
     try db.addRange("GraphemeBreak", "Control", .{ .first = 0x00, .last = 0x01 });
     try db.addRange("Age", "V1_1", .{ .first = 0x41, .last = 0x41 });
 
@@ -1068,6 +1132,8 @@ test "emitRoots writes generated property roots" {
     defer testing.allocator.free(runicode);
     const sets = try tmp.dir.readFileAlloc(testing.io, "sets.zig", testing.allocator, .limited(4096));
     defer testing.allocator.free(sets);
+    const supremum = try tmp.dir.readFileAlloc(testing.io, "sets/Supremum.zig", testing.allocator, .limited(4096));
+    defer testing.allocator.free(supremum);
     const codepoints = try tmp.dir.readFileAlloc(testing.io, "codepoints.zig", testing.allocator, .limited(4096));
     defer testing.allocator.free(codepoints);
     const strs = try tmp.dir.readFileAlloc(testing.io, "strs.zig", testing.allocator, .limited(4096));
@@ -1088,8 +1154,12 @@ test "emitRoots writes generated property roots" {
     try testing.expect(std.mem.indexOf(u8, sets, "pub const gcb = GraphemeBreak;") != null);
     try testing.expect(std.mem.indexOf(u8, sets, "pub const gbp = GraphemeBreak;") != null);
     try testing.expect(std.mem.indexOf(u8, sets, "pub const Grapheme_Break_Property = GraphemeBreak;") != null);
+    try testing.expect(std.mem.indexOf(u8, sets, "pub const Supremum = @import(\"sets/Supremum.zig\").Supremum;") != null);
+    try testing.expect(std.mem.indexOf(u8, supremum, "pub const Supremum") != null);
     try testing.expect(std.mem.indexOf(u8, codepoints, "pub const gc = GeneralCategory;") != null);
+    try testing.expect(std.mem.indexOf(u8, codepoints, "Supremum") == null);
     try testing.expect(std.mem.indexOf(u8, strs, "pub const GeneralCategory") != null);
+    try testing.expect(std.mem.indexOf(u8, strs, "Supremum") == null);
     try testing.expect(std.mem.indexOf(u8, strs, "pub const gbp = GraphemeBreak;") != null);
     try testing.expect(std.mem.indexOf(u8, enums, "pub const gc = GeneralCategory;") != null);
     try testing.expect(std.mem.indexOf(u8, maps, "pub const sets = struct {") != null);
