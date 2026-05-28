@@ -1,7 +1,10 @@
 const std = @import("std");
 const runicode = @import("runicode");
+const test_options = @import("test_options");
 
 test "generated roots expose property aliases" {
+    if (comptime !test_options.generate_sets) return;
+
     try std.testing.expect(runicode.sets.gc.Lu.equalTo(runicode.sets.GeneralCategory.Lu));
     try std.testing.expect(runicode.sets.General_Category.Lu.equalTo(runicode.sets.GeneralCategory.Lu));
     try std.testing.expect(runicode.sets.scx.Latin.equalTo(runicode.sets.ScriptsExtended.Latin));
@@ -10,6 +13,8 @@ test "generated roots expose property aliases" {
 }
 
 test "Supremum is generated as a set excluding Cn Co and Cs" {
+    if (comptime !test_options.generate_sets) return;
+
     try std.testing.expect(runicode.sets.GeneralCategory.Lu.subsetOf(runicode.sets.Supremum));
 
     try expectDisjoint(runicode.sets.Supremum, runicode.sets.GeneralCategory.Unassigned);
@@ -18,25 +23,46 @@ test "Supremum is generated as a set excluding Cn Co and Cs" {
 }
 
 test "kind-specific named maps resolve generated property maps with loose matching" {
-    const GeneralCategorySets = runicode.NamedSetMaps.get("gc").?;
-    var general_category_sets = GeneralCategorySets{};
-    try std.testing.expect((general_category_sets.get("Lu") orelse unreachable).equalTo(runicode.sets.GeneralCategory.Lu));
+    if (comptime test_options.generate_sets) {
+        const GeneralCategorySets = runicode.NamedSetMaps.get("gc").?;
+        var general_category_sets = GeneralCategorySets{};
+        try std.testing.expect((general_category_sets.get("Lu") orelse unreachable).equalTo(runicode.sets.GeneralCategory.Lu));
 
-    const ScriptExtensionSets = runicode.NamedSetMaps.get("Script Extensions").?;
-    var script_extension_sets = ScriptExtensionSets{};
-    try std.testing.expect((script_extension_sets.get("Latn") orelse unreachable).equalTo(runicode.sets.ScriptsExtended.Latin));
+        const ScriptExtensionSets = runicode.NamedSetMaps.get("Script Extensions").?;
+        var script_extension_sets = ScriptExtensionSets{};
+        try std.testing.expect((script_extension_sets.get("Latn") orelse unreachable).equalTo(runicode.sets.ScriptsExtended.Latin));
 
-    const GraphemeBreakSets = runicode.NamedSetMaps.get("Grapheme Break Property").?;
-    var grapheme_break_sets = GraphemeBreakSets{};
-    try std.testing.expect((grapheme_break_sets.get("CN") orelse unreachable).equalTo(runicode.sets.GraphemeBreak.Control));
+        const GraphemeBreakSets = runicode.NamedSetMaps.get("Grapheme Break Property").?;
+        var grapheme_break_sets = GraphemeBreakSets{};
+        try std.testing.expect((grapheme_break_sets.get("CN") orelse unreachable).equalTo(runicode.sets.GraphemeBreak.Control));
+    }
 
-    const GeneralCategoryCodepoints = runicode.NamedCodepointMaps.get("gc").?;
-    var general_category_codepoints = GeneralCategoryCodepoints{};
-    try std.testing.expectEqualSlices(u21, &runicode.codepoints.GeneralCategory.Lu, general_category_codepoints.get("Uppercase Letter") orelse unreachable);
+    if (comptime test_options.generate_codepoints) {
+        const GeneralCategoryCodepoints = runicode.NamedCodepointMaps.get("gc").?;
+        var general_category_codepoints = GeneralCategoryCodepoints{};
+        try std.testing.expectEqualSlices(u21, &runicode.codepoints.GeneralCategory.Lu, general_category_codepoints.get("Uppercase Letter") orelse unreachable);
+    }
 
-    const GraphemeBreakStrings = runicode.NamedStringMaps.get("Grapheme Break Property").?;
-    var grapheme_break_strings = GraphemeBreakStrings{};
-    try std.testing.expectEqualStrings(runicode.strs.GraphemeBreak.Control, grapheme_break_strings.get("CN") orelse unreachable);
+    if (comptime test_options.generate_strings) {
+        const GraphemeBreakStrings = runicode.NamedStringMaps.get("Grapheme Break Property").?;
+        var grapheme_break_strings = GraphemeBreakStrings{};
+        try std.testing.expectEqualStrings(runicode.strs.GraphemeBreak.Control, grapheme_break_strings.get("CN") orelse unreachable);
+    }
+}
+
+test "disabled generated views are absent from the public root" {
+    try std.testing.expectEqual(test_options.generate_sets, @hasDecl(runicode, "sets"));
+    try std.testing.expectEqual(test_options.generate_codepoints, @hasDecl(runicode, "codepoints"));
+    try std.testing.expectEqual(test_options.generate_strings, @hasDecl(runicode, "strs"));
+    try std.testing.expectEqual(
+        test_options.generate_sets or test_options.generate_codepoints or test_options.generate_strings,
+        @hasDecl(runicode, "maps"),
+    );
+    try std.testing.expect(@hasDecl(runicode, "NamedMap"));
+    try std.testing.expect(@hasDecl(runicode, "NamedMaps"));
+    try std.testing.expectEqual(test_options.generate_sets, @hasDecl(runicode, "NamedSetMaps"));
+    try std.testing.expectEqual(test_options.generate_codepoints, @hasDecl(runicode, "NamedCodepointMaps"));
+    try std.testing.expectEqual(test_options.generate_strings, @hasDecl(runicode, "NamedStringMaps"));
 }
 
 fn expectDisjoint(left: anytype, right: anytype) !void {

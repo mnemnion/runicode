@@ -17,7 +17,8 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const allocator = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(allocator);
-    if (argv.len != 3) return error.InvalidArguments;
+    if (argv.len < 3) return error.InvalidArguments;
+    const kinds = try parseGeneratedKinds(argv[3..]);
 
     var ucd_dir = try std.Io.Dir.cwd().openDir(io, argv[1], .{ .iterate = true });
     defer ucd_dir.close(io);
@@ -33,7 +34,7 @@ pub fn main(init: std.process.Init) !void {
     try aliases.loadPropertyAliasesFile(io, ucd_dir);
     try aliases.loadPropertyValueAliasesFile(io, ucd_dir);
 
-    const stats = try runJobs(io, allocator, init.gpa, ucd_dir, out_dir, &aliases, &manifest.known_files);
+    const stats = try runJobs(io, allocator, init.gpa, ucd_dir, out_dir, &aliases, &manifest.known_files, kinds);
 
     var stdout_buf: [128]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
@@ -56,8 +57,9 @@ fn runJobs(
     out_dir: std.Io.Dir,
     aliases: *const Aliases,
     entries: []const manifest.UcdFile,
+    kinds: emit.GeneratedKinds,
 ) !RunStats {
-    try precreateOutputDirs(io, out_dir);
+    try precreateOutputDirs(io, out_dir, kinds);
 
     const planned_jobs = try jobs_data.jobs(allocator, entries);
     defer jobs_data.freeJobs(allocator, planned_jobs);
@@ -75,9 +77,9 @@ fn runJobs(
     var first_error: ?anyerror = null;
 
     for (planned_jobs) |job| {
-        const future = std.Io.concurrent(io, worker.runJob, .{ io, gpa, ucd_dir, out_dir, aliases, job }) catch |err| switch (err) {
+        const future = std.Io.concurrent(io, worker.runJob, .{ io, gpa, ucd_dir, out_dir, aliases, job, kinds }) catch |err| switch (err) {
             error.ConcurrencyUnavailable => {
-                const stats = worker.runJob(io, gpa, ucd_dir, out_dir, aliases, job) catch |worker_err| {
+                const stats = worker.runJob(io, gpa, ucd_dir, out_dir, aliases, job, kinds) catch |worker_err| {
                     if (first_error == null) first_error = worker_err;
                     continue;
                 };
@@ -104,7 +106,7 @@ fn runJobs(
 
     const groups = try group_meta.toOwnedSlice(allocator);
     defer emit.freeGroupMeta(allocator, groups);
-    try emit.emitRootIndexes(allocator, .{ .io = io, .dir = out_dir }, groups, aliases);
+    try emit.emitRootIndexes(allocator, .{ .io = io, .dir = out_dir, .kinds = kinds }, groups, aliases);
 
     return .{
         .jobs = planned_jobs.len,
@@ -112,10 +114,33 @@ fn runJobs(
     };
 }
 
-fn precreateOutputDirs(io: std.Io, out_dir: std.Io.Dir) !void {
-    inline for (.{ "sets", "codepoints", "strs", "maps" }) |path| {
-        _ = try out_dir.createDirPath(io, path);
+fn precreateOutputDirs(io: std.Io, out_dir: std.Io.Dir, kinds: emit.GeneratedKinds) !void {
+    if (kinds.sets) _ = try out_dir.createDirPath(io, "sets");
+    if (kinds.codepoints) _ = try out_dir.createDirPath(io, "codepoints");
+    if (kinds.strings) _ = try out_dir.createDirPath(io, "strs");
+    if (kinds.any()) _ = try out_dir.createDirPath(io, "maps");
+}
+
+fn parseGeneratedKinds(args: []const []const u8) !emit.GeneratedKinds {
+    var kinds: emit.GeneratedKinds = .{};
+    for (args) |arg| {
+        if (std.mem.eql(u8, arg, "--sets")) {
+            kinds.sets = true;
+        } else if (std.mem.eql(u8, arg, "--no-sets")) {
+            kinds.sets = false;
+        } else if (std.mem.eql(u8, arg, "--codepoints")) {
+            kinds.codepoints = true;
+        } else if (std.mem.eql(u8, arg, "--no-codepoints")) {
+            kinds.codepoints = false;
+        } else if (std.mem.eql(u8, arg, "--strings")) {
+            kinds.strings = true;
+        } else if (std.mem.eql(u8, arg, "--no-strings")) {
+            kinds.strings = false;
+        } else {
+            return error.InvalidArguments;
+        }
     }
+    return kinds;
 }
 
 fn appendWorkerStats(
@@ -181,7 +206,7 @@ test "runJobs dispatches workers and writes root indexes" {
 
     const stats = try runJobs(testing.io, testing.allocator, testing.allocator, tmp.dir, out, &aliases, &.{
         .{ .path = "Blocks.txt", .kind = .codepoint_property, .property = "blk", .namespace = "Blocks" },
-    });
+    }, .{});
 
     try testing.expectEqual(@as(usize, 1), stats.jobs);
     try testing.expectEqual(@as(usize, 1), stats.groups);

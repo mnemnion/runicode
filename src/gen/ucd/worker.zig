@@ -152,6 +152,7 @@ pub fn runJob(
     out_dir: std.Io.Dir,
     aliases: *const Aliases,
     job: jobs_data.Job,
+    kinds: emit.GeneratedKinds,
 ) anyerror!WorkerStats {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -172,7 +173,7 @@ pub fn runJob(
     }
 
     try db.finalizeRuneSets();
-    const groups = try emit.emitGroupsOwned(allocator, gpa, .{ .io = io, .dir = out_dir }, &db, aliases);
+    const groups = try emit.emitGroupsOwned(allocator, gpa, .{ .io = io, .dir = out_dir, .kinds = kinds }, &db, aliases);
     return .{
         .groups = groups,
         .metadata_allocator = gpa,
@@ -404,7 +405,7 @@ test "runJob emits one simple property namespace" {
         .kind = .namespace,
         .namespace = "Blocks",
         .entries = &.{.{ .path = "Blocks.txt", .kind = .codepoint_property, .property = "blk", .namespace = "Blocks" }},
-    });
+    }, .{});
     defer stats.deinit();
 
     try testing.expectEqual(@as(usize, 1), stats.groups.len);
@@ -445,7 +446,7 @@ test "runJob emits core properties from merged entries" {
             .{ .path = "PropList.txt", .kind = .codepoint_property, .namespace = "CoreProperties" },
             .{ .path = "emoji/emoji-data.txt", .kind = .codepoint_property, .namespace = "CoreProperties" },
         },
-    });
+    }, .{});
     defer stats.deinit();
 
     try testing.expectEqual(@as(usize, 1), stats.groups.len);
@@ -484,7 +485,7 @@ test "runJob emits general category aggregates locally" {
         .kind = .general_category,
         .namespace = "GeneralCategory",
         .entries = &.{.{ .path = "extracted/DerivedGeneralCategory.txt", .kind = .codepoint_property, .property = "gc", .namespace = "GeneralCategory" }},
-    });
+    }, .{});
     defer stats.deinit();
 
     try testing.expectEqual(@as(usize, 38), stats.groups[0].values.len);
@@ -525,7 +526,7 @@ test "runJob emits scripts bundle with script extension inheritance" {
             .{ .path = "Scripts.txt", .kind = .codepoint_property, .property = "sc", .namespace = "Scripts" },
             .{ .path = "ScriptExtensions.txt", .kind = .script_extensions, .property = "scx", .namespace = "ScriptsExtended" },
         },
-    });
+    }, .{});
     defer stats.deinit();
 
     try testing.expectEqual(@as(usize, 2), stats.groups.len);

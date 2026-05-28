@@ -4,6 +4,9 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
 
     const optimize = b.standardOptimizeOption(.{});
+    const generate_sets = b.option(bool, "sets", "Generate Unicode property RuneSet views") orelse true;
+    const generate_strings = b.option(bool, "strings", "Generate Unicode property UTF-8 string views") orelse true;
+    const generate_codepoints = b.option(bool, "codepoints", "Generate Unicode property codepoint slice views") orelse true;
 
     // Tool module for internal use
     const tool_mod = b.createModule(.{
@@ -55,6 +58,9 @@ pub fn build(b: *std.Build) void {
     const run_gen = b.addRunArtifact(runicode_gen_exe);
     run_gen.addDirectoryArg(b.path("UCD"));
     const generated_dir = run_gen.addOutputDirectoryArg("runicode-generated");
+    run_gen.addArg(if (generate_sets) "--sets" else "--no-sets");
+    run_gen.addArg(if (generate_strings) "--strings" else "--no-strings");
+    run_gen.addArg(if (generate_codepoints) "--codepoints" else "--no-codepoints");
     const generated_runicode = generated_dir.path(b, "runicode.zig");
     const install_generated_code = b.addInstallDirectory(.{
         .source_dir = generated_dir,
@@ -107,7 +113,12 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/test/runicode-generated.zig"),
         }),
     });
+    const runicode_api_test_options = b.addOptions();
+    runicode_api_test_options.addOption(bool, "generate_sets", generate_sets);
+    runicode_api_test_options.addOption(bool, "generate_strings", generate_strings);
+    runicode_api_test_options.addOption(bool, "generate_codepoints", generate_codepoints);
     runicode_api_tests.root_module.addImport("runicode", runicode_mod);
+    runicode_api_tests.root_module.addOptions("test_options", runicode_api_test_options);
 
     const run_runicode_api_tests = b.addRunArtifact(runicode_api_tests);
 

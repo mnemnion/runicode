@@ -7,6 +7,16 @@ const Aliases = @import("aliases.zig").Aliases;
 const parse = @import("parse.zig");
 const RuneSet = @import("runeset").RuneSet;
 
+pub const GeneratedKinds = struct {
+    sets: bool = true,
+    codepoints: bool = true,
+    strings: bool = true,
+
+    pub fn any(kinds: GeneratedKinds) bool {
+        return kinds.sets or kinds.codepoints or kinds.strings;
+    }
+};
+
 /// Filesystem handles and root filenames used by the emitter.
 pub const OutputDir = struct {
     /// Caller-owned I/O context threaded through every std.Io operation.
@@ -14,6 +24,9 @@ pub const OutputDir = struct {
 
     /// Already-open output directory; emission should not decide where it lives.
     dir: std.Io.Dir,
+
+    /// Generated data views selected by build options.
+    kinds: GeneratedKinds = .{},
 
     /// Top-level module imported by package users.
     runicode_path: []const u8 = "runicode.zig",
@@ -93,9 +106,13 @@ pub fn emitRootIndexes(
     std.mem.sort(GroupMeta, sorted_groups, {}, groupMetaLessThan);
 
     try writeDataRootFiles(allocator, dir, sorted_groups, aliases);
-    try writeRootFile(dir, dir.enums_path, writeEnumsRoot, .{ allocator, sorted_groups, aliases });
-    try writeMapsRootFile(allocator, dir, sorted_groups, aliases);
-    try writeRootFile(dir, dir.runicode_path, writeRunicodeRoot, .{});
+    if (dir.kinds.any()) {
+        try writeRootFile(dir, dir.enums_path, writeEnumsRoot, .{ allocator, sorted_groups, aliases });
+    }
+    if (dir.kinds.any()) {
+        try writeMapsRootFile(allocator, dir, sorted_groups, aliases);
+    }
+    try writeRootFile(dir, dir.runicode_path, writeRunicodeRoot, .{dir.kinds});
 }
 
 fn collectGroupMeta(allocator: std.mem.Allocator, group_names: []const []const u8, db: anytype) ![]GroupMeta {
@@ -148,10 +165,16 @@ fn writeDataGroupFiles(
     db: anytype,
     aliases: *const Aliases,
 ) !void {
-    try writeSetsGroupFiles(allocator, dir, group_names, db, aliases);
-    try writeSupremumSetFile(allocator, dir, db);
-    try writeCodepointsGroupFiles(allocator, dir, group_names, db, aliases);
-    try writeStrsGroupFiles(allocator, dir, group_names, db, aliases);
+    if (dir.kinds.sets) {
+        try writeSetsGroupFiles(allocator, dir, group_names, db, aliases);
+        try writeSupremumSetFile(allocator, dir, db);
+    }
+    if (dir.kinds.codepoints) {
+        try writeCodepointsGroupFiles(allocator, dir, group_names, db, aliases);
+    }
+    if (dir.kinds.strings) {
+        try writeStrsGroupFiles(allocator, dir, group_names, db, aliases);
+    }
 }
 
 fn writeDataRootFiles(
@@ -160,9 +183,15 @@ fn writeDataRootFiles(
     groups: []const GroupMeta,
     aliases: *const Aliases,
 ) !void {
-    try writeDataRootFile(allocator, dir, dir.sets_path, "sets", groups, aliases);
-    try writeDataRootFile(allocator, dir, dir.codepoints_path, "codepoints", groups, aliases);
-    try writeDataRootFile(allocator, dir, dir.strs_path, "strs", groups, aliases);
+    if (dir.kinds.sets) {
+        try writeDataRootFile(allocator, dir, dir.sets_path, "sets", groups, aliases);
+    }
+    if (dir.kinds.codepoints) {
+        try writeDataRootFile(allocator, dir, dir.codepoints_path, "codepoints", groups, aliases);
+    }
+    if (dir.kinds.strings) {
+        try writeDataRootFile(allocator, dir, dir.strs_path, "strs", groups, aliases);
+    }
 }
 
 fn writeDataRootFile(
@@ -485,36 +514,71 @@ fn writeEnumType(allocator: std.mem.Allocator, writer: *std.Io.Writer, group_nam
 }
 
 /// Writes runicode.zig, the public import root for generated data.
-fn writeRunicodeRoot(writer: *std.Io.Writer) !void {
+fn writeRunicodeRoot(writer: *std.Io.Writer, kinds: GeneratedKinds) !void {
     try writer.writeAll(header_txt);
+    if (kinds.sets) {
+        try writer.writeAll(
+            \\/// Unicode property data as RuneSet values.
+            \\pub const sets = @import("sets.zig");
+            \\
+        );
+    }
+    if (kinds.codepoints) {
+        try writer.writeAll(
+            \\/// Unicode property data as sorted codepoint slices.
+            \\pub const codepoints = @import("codepoints.zig");
+            \\
+        );
+    }
+    if (kinds.strings) {
+        try writer.writeAll(
+            \\/// Unicode property data as UTF-8 strings.
+            \\pub const strs = @import("strs.zig");
+            \\pub const strings = strs;
+            \\
+        );
+    }
+    if (kinds.any()) {
+        try writer.writeAll(
+            \\/// Unicode property enum types.
+            \\pub const enums = @import("enums.zig");
+            \\
+        );
+    }
+    if (kinds.any()) {
+        try writer.writeAll(
+            \\/// Loose-matching maps for Unicode property namespaces.
+            \\pub const maps = @import("maps.zig");
+            \\
+        );
+        if (kinds.sets) {
+            try writer.writeAll(
+                \\/// Loose-matching map over generated Unicode property set maps.
+                \\pub const NamedSetMaps = maps.NamedSetMaps;
+                \\
+            );
+        }
+        if (kinds.codepoints) {
+            try writer.writeAll(
+                \\/// Loose-matching map over generated Unicode property codepoint maps.
+                \\pub const NamedCodepointMaps = maps.NamedCodepointMaps;
+                \\
+            );
+        }
+        if (kinds.strings) {
+            try writer.writeAll(
+                \\/// Loose-matching map over generated Unicode property string maps.
+                \\pub const NamedStringMaps = maps.NamedStringMaps;
+                \\
+            );
+        }
+    }
     try writer.writeAll(
-        \\/// Unicode property data as RuneSet values.
-        \\pub const sets = @import("sets.zig");
-        \\
-        \\/// Unicode property data as sorted codepoint slices.
-        \\pub const codepoints = @import("codepoints.zig");
-        \\
-        \\/// Unicode property data as UTF-8 strings.
-        \\pub const strs = @import("strs.zig");
-        \\pub const strings = strs;
-        \\
-        \\/// Unicode property enum types.
-        \\pub const enums = @import("enums.zig");
-        \\
-        \\/// Loose-matching maps for Unicode property namespaces.
-        \\pub const maps = @import("maps.zig");
-        \\
-        \\/// Loose-matching map over generated Unicode property set maps.
-        \\pub const NamedSetMaps = maps.NamedSetMaps;
-        \\
-        \\/// Loose-matching map over generated Unicode property codepoint maps.
-        \\pub const NamedCodepointMaps = maps.NamedCodepointMaps;
-        \\
-        \\/// Loose-matching map over generated Unicode property string maps.
-        \\pub const NamedStringMaps = maps.NamedStringMaps;
-        \\
         \\/// Compile-time constructor for loose-matching property maps.
         \\pub const NamedMap = @import("ucd-tools").NamedMap;
+        \\
+        \\/// Backwards-readable plural alias for the loose-matching map constructor.
+        \\pub const NamedMaps = NamedMap;
         \\
     );
 }
@@ -534,10 +598,16 @@ fn writeMapsRootFile(
 
     try writer.writeAll(header_txt);
     try writer.writeAll("const ucd_tools = @import(\"ucd-tools\");\n\n");
-    try writeKindMapSource(allocator, writer, groups, aliases, "sets", "sets", "NamedSetMaps");
-    try writeKindMapSource(allocator, writer, groups, aliases, "codepoints", "codepoints", "NamedCodepointMaps");
-    try writeKindMapSource(allocator, writer, groups, aliases, "strings", "strs", "NamedStringMaps");
-    try writer.writeAll("pub const strs = strings;\n");
+    if (dir.kinds.sets) {
+        try writeKindMapSource(allocator, writer, groups, aliases, "sets", "sets", "NamedSetMaps");
+    }
+    if (dir.kinds.codepoints) {
+        try writeKindMapSource(allocator, writer, groups, aliases, "codepoints", "codepoints", "NamedCodepointMaps");
+    }
+    if (dir.kinds.strings) {
+        try writeKindMapSource(allocator, writer, groups, aliases, "strings", "strs", "NamedStringMaps");
+        try writer.writeAll("pub const strs = strings;\n");
+    }
     try writer.flush();
 }
 
