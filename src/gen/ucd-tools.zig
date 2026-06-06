@@ -99,6 +99,40 @@ pub fn normalizePropName(name: []const u8, buf: []u8) ?usize {
     return len;
 }
 
+/// Perform loose Unicode normalization of a characater name.  This differs
+/// from properties due to the existence of one oddball name which must be
+/// handled as an exception.
+pub fn normalizeCharacterName(name: []const u8, buf: []u8) ?usize {
+    var len: usize = 0;
+    var idx: usize = 0;
+
+    while (idx < name.len) : (idx += 1) {
+        const byte = name[idx];
+        switch (byte) {
+            'A'...'Z', 'a'...'z', '0'...'9' => {
+                if (len == buf.len) return null;
+                buf[len] = std.ascii.toLower(byte);
+                len += 1;
+            },
+            ' ', '_', '\t', '\n', '\r', 0x0b, 0x0c => {},
+            '-' => {
+                if (isU1180NameHyphen(name, idx, buf[0..len])) {
+                    if (len == buf.len) return null;
+                    buf[len] = '-';
+                    len += 1;
+                } else if (!isMedialNameHyphen(name, idx)) {
+                    if (len == buf.len) return null;
+                    buf[len] = '-';
+                    len += 1;
+                }
+            },
+            else => return null,
+        }
+    }
+
+    return len;
+}
+
 fn mapValueType(comptime Decl: type) type {
     return switch (@typeInfo(Decl)) {
         .array => |array| []const array.child,
@@ -153,6 +187,18 @@ fn prefixlessPropNameStart(name: []const u8) ?usize {
 
 fn isLoosePropNameSeparator(byte: u8) bool {
     return byte == ' ' or byte == '_' or byte == '-';
+}
+
+fn isMedialNameHyphen(name: []const u8, hyphen_idx: usize) bool {
+    if (hyphen_idx == 0 or hyphen_idx + 1 == name.len) return false;
+    return std.ascii.isAlphabetic(name[hyphen_idx - 1]) and std.ascii.isAlphabetic(name[hyphen_idx + 1]);
+}
+
+fn isU1180NameHyphen(name: []const u8, hyphen_idx: usize, normalized_prefix: []const u8) bool {
+    if (!std.mem.eql(u8, normalized_prefix, "hanguljungseongo")) return false;
+    var suffix_buf: [8]u8 = undefined;
+    const suffix_len = normalizeCharacterName(name[hyphen_idx + 1 ..], &suffix_buf) orelse return false;
+    return std.mem.eql(u8, suffix_buf[0..suffix_len], "e");
 }
 
 pub fn ltString(_: void, l: []const u8, r: []const u8) bool {
@@ -660,6 +706,25 @@ test "normalizePropName rejects short buffers and non-printable ascii" {
     try std.testing.expectEqual(null, normalizePropName("General\tCategory", &buf));
     try std.testing.expectEqual(null, normalizePropName("General\x7fCategory", &buf));
     try std.testing.expectEqual(null, normalizePropName("General\xc2\xa0Category", &buf));
+}
+
+test "normalizeCharacterName follows UAX44-LM2 hyphen handling" {
+    var buf: [128]u8 = undefined;
+
+    const u1180_len = normalizeCharacterName("HANGUL JUNGSEONG O-E", &buf).?;
+    try std.testing.expectEqualStrings("hanguljungseongo-e", buf[0..u1180_len]);
+
+    const u117f_len = normalizeCharacterName("HANGUL JUNGSEONG O-EO", &buf).?;
+    try std.testing.expectEqualStrings("hanguljungseongoeo", buf[0..u117f_len]);
+
+    const cjk_len = normalizeCharacterName("CJK UNIFIED IDEOGRAPH-4E00", &buf).?;
+    try std.testing.expectEqualStrings("cjkunifiedideograph-4e00", buf[0..cjk_len]);
+
+    const hyphen_len = normalizeCharacterName("HYPHEN-MINUS", &buf).?;
+    try std.testing.expectEqualStrings("hyphenminus", buf[0..hyphen_len]);
+
+    const tibetan_len = normalizeCharacterName("TIBETAN LETTER -A", &buf).?;
+    try std.testing.expectEqualStrings("tibetanletter-a", buf[0..tibetan_len]);
 }
 
 const assert = std.debug.assert;

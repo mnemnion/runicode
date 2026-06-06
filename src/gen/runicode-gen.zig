@@ -3,6 +3,7 @@ const audit = @import("ucd/audit.zig");
 const alias_data = @import("ucd/aliases.zig");
 const emit = @import("ucd/emit.zig");
 const jobs_data = @import("ucd/jobs.zig");
+const names = @import("ucd/names.zig");
 const worker = @import("ucd/worker.zig");
 const manifest = @import("ucd/manifest.zig");
 const testing = std.testing;
@@ -106,6 +107,9 @@ fn runJobs(
 
     const groups = try group_meta.toOwnedSlice(allocator);
     defer emit.freeGroupMeta(allocator, groups);
+    if (kinds.names) {
+        try names.emitCharacterNames(allocator, io, ucd_dir, out_dir);
+    }
     try emit.emitRootIndexes(allocator, .{ .io = io, .dir = out_dir, .kinds = kinds }, groups, aliases);
 
     return .{
@@ -132,6 +136,10 @@ fn parseGeneratedKinds(args: []const []const u8) !emit.GeneratedKinds {
             kinds.codepoints = true;
         } else if (std.mem.eql(u8, arg, "--no-codepoints")) {
             kinds.codepoints = false;
+        } else if (std.mem.eql(u8, arg, "--names")) {
+            kinds.names = true;
+        } else if (std.mem.eql(u8, arg, "--no-names")) {
+            kinds.names = false;
         } else if (std.mem.eql(u8, arg, "--strings")) {
             kinds.strings = true;
         } else if (std.mem.eql(u8, arg, "--no-strings")) {
@@ -141,6 +149,13 @@ fn parseGeneratedKinds(args: []const []const u8) !emit.GeneratedKinds {
         }
     }
     return kinds;
+}
+
+test "parseGeneratedKinds parses names option independently" {
+    const kinds = try parseGeneratedKinds(&.{ "--no-codepoints", "--names" });
+
+    try testing.expect(!kinds.codepoints);
+    try testing.expect(kinds.names);
 }
 
 fn appendWorkerStats(
@@ -206,7 +221,7 @@ test "runJobs dispatches workers and writes root indexes" {
 
     const stats = try runJobs(testing.io, testing.allocator, testing.allocator, tmp.dir, out, &aliases, &.{
         .{ .path = "Blocks.txt", .kind = .codepoint_property, .property = "blk", .namespace = "Blocks" },
-    }, .{});
+    }, .{ .names = false });
 
     try testing.expectEqual(@as(usize, 1), stats.jobs);
     try testing.expectEqual(@as(usize, 1), stats.groups);

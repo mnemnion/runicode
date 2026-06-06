@@ -7,6 +7,7 @@ pub fn build(b: *std.Build) void {
     const generate_sets = b.option(bool, "sets", "Generate Unicode property RuneSet views") orelse true;
     const generate_strings = b.option(bool, "strings", "Generate Unicode property UTF-8 string views") orelse true;
     const generate_codepoints = b.option(bool, "codepoints", "Generate Unicode property codepoint slice views") orelse true;
+    const generate_names = b.option(bool, "names", "Generate Unicode character name lookup map") orelse true;
 
     // Tool module for internal use
     const tool_mod = b.createModule(.{
@@ -36,6 +37,11 @@ pub fn build(b: *std.Build) void {
 
     tool_mod.addImport("unicoder", unicoder_dep.module("unicoder"));
 
+    const memex_dep = b.dependency("memex", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Generator Steps
     //
     // I'm just going to do this directly with custom executables, rather than
@@ -54,6 +60,7 @@ pub fn build(b: *std.Build) void {
     runicode_gen_exe.root_module.addImport("ezcaper", ezcaper_dep.module("ezcaper"));
     runicode_gen_exe.root_module.addImport("runeset", runeset_dep.module("runeset"));
     runicode_gen_exe.root_module.addImport("unicoder", unicoder_dep.module("unicoder"));
+    runicode_gen_exe.root_module.addImport("fysti", memex_dep.module("fysti"));
 
     const run_gen = b.addRunArtifact(runicode_gen_exe);
     run_gen.addDirectoryArg(b.path("UCD"));
@@ -61,6 +68,7 @@ pub fn build(b: *std.Build) void {
     run_gen.addArg(if (generate_sets) "--sets" else "--no-sets");
     run_gen.addArg(if (generate_strings) "--strings" else "--no-strings");
     run_gen.addArg(if (generate_codepoints) "--codepoints" else "--no-codepoints");
+    run_gen.addArg(if (generate_names) "--names" else "--no-names");
     const generated_runicode = generated_dir.path(b, "runicode.zig");
     const install_generated_code = b.addInstallDirectory(.{
         .source_dir = generated_dir,
@@ -86,6 +94,7 @@ pub fn build(b: *std.Build) void {
 
     runicode_mod.addImport("runeset", runeset_dep.module("runeset"));
     runicode_mod.addImport("ucd-tools", tool_mod);
+    runicode_mod.addImport("fysti", memex_dep.module("fysti"));
 
     const tool_unit_tests = b.addTest(.{
         .root_module = tool_mod,
@@ -103,6 +112,7 @@ pub fn build(b: *std.Build) void {
     gen_unit_tests.root_module.addImport("runeset", runeset_dep.module("runeset"));
     gen_unit_tests.root_module.addImport("ezcaper", ezcaper_dep.module("ezcaper"));
     gen_unit_tests.root_module.addImport("unicoder", unicoder_dep.module("unicoder"));
+    gen_unit_tests.root_module.addImport("fysti", memex_dep.module("fysti"));
 
     const run_gen_unit_tests = b.addRunArtifact(gen_unit_tests);
 
@@ -117,6 +127,7 @@ pub fn build(b: *std.Build) void {
     runicode_api_test_options.addOption(bool, "generate_sets", generate_sets);
     runicode_api_test_options.addOption(bool, "generate_strings", generate_strings);
     runicode_api_test_options.addOption(bool, "generate_codepoints", generate_codepoints);
+    runicode_api_test_options.addOption(bool, "generate_names", generate_names);
     runicode_api_tests.root_module.addImport("runicode", runicode_mod);
     runicode_api_tests.root_module.addOptions("test_options", runicode_api_test_options);
 

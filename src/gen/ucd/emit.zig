@@ -11,6 +11,7 @@ pub const GeneratedKinds = struct {
     sets: bool = true,
     codepoints: bool = true,
     strings: bool = true,
+    names: bool = true,
 
     pub fn any(kinds: GeneratedKinds) bool {
         return kinds.sets or kinds.codepoints or kinds.strings;
@@ -527,6 +528,15 @@ fn writeRunicodeRoot(writer: *std.Io.Writer, kinds: GeneratedKinds) !void {
         try writer.writeAll(
             \\/// Unicode property data as sorted codepoint slices.
             \\pub const codepoints = @import("codepoints.zig");
+            \\
+        );
+    }
+    if (kinds.names) {
+        try writer.writeAll(
+            \\/// Unicode character names and formal aliases as a loose-matching codepoint map.
+            \\pub const names = @import("names.zig");
+            \\pub const CharacterNames = names.CharacterNames;
+            \\pub const NamedCodepoints = CharacterNames;
             \\
         );
     }
@@ -1214,6 +1224,9 @@ test "emitRoots writes generated property roots" {
     defer testing.allocator.free(maps);
 
     try testing.expect(std.mem.indexOf(u8, runicode, "pub const sets = @import(\"sets.zig\");") != null);
+    try testing.expect(std.mem.indexOf(u8, runicode, "pub const names = @import(\"names.zig\");") != null);
+    try testing.expect(std.mem.indexOf(u8, runicode, "pub const CharacterNames = names.CharacterNames;") != null);
+    try testing.expect(std.mem.indexOf(u8, runicode, "pub const NamedCodepoints = CharacterNames;") != null);
     try testing.expect(std.mem.indexOf(u8, runicode, "pub const maps = @import(\"maps.zig\");") != null);
     try testing.expect(std.mem.indexOf(u8, runicode, "pub const NamedSetMaps = maps.NamedSetMaps;") != null);
     try testing.expect(std.mem.indexOf(u8, runicode, "pub const NamedCodepointMaps = maps.NamedCodepointMaps;") != null);

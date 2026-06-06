@@ -50,6 +50,17 @@ test "kind-specific named maps resolve generated property maps with loose matchi
     }
 }
 
+test "character names resolve through loose-matching fst" {
+    if (comptime !test_options.generate_names) return;
+
+    var names = runicode.CharacterNames{};
+    try std.testing.expectEqual(@as(?u21, 0x002D), names.get("hyphen minus"));
+    try std.testing.expectEqual(@as(?u21, 0x000A), names.get("line_feed"));
+    try std.testing.expectEqual(@as(?u21, 0x4E00), names.get("CJK Unified Ideograph-4E00"));
+    try std.testing.expectEqual(@as(?u21, 0x1180), names.get("HANGUL JUNGSEONG O-E"));
+    try std.testing.expectEqual(@as(?u21, 0x116C), names.get("HANGUL JUNGSEONG OE"));
+}
+
 test "disabled generated views are absent from the public root" {
     try std.testing.expectEqual(test_options.generate_sets, @hasDecl(runicode, "sets"));
     try std.testing.expectEqual(test_options.generate_codepoints, @hasDecl(runicode, "codepoints"));
@@ -62,6 +73,9 @@ test "disabled generated views are absent from the public root" {
     try std.testing.expect(@hasDecl(runicode, "NamedMaps"));
     try std.testing.expectEqual(test_options.generate_sets, @hasDecl(runicode, "NamedSetMaps"));
     try std.testing.expectEqual(test_options.generate_codepoints, @hasDecl(runicode, "NamedCodepointMaps"));
+    try std.testing.expectEqual(test_options.generate_names, @hasDecl(runicode, "names"));
+    try std.testing.expectEqual(test_options.generate_names, @hasDecl(runicode, "CharacterNames"));
+    try std.testing.expectEqual(test_options.generate_names, @hasDecl(runicode, "NamedCodepoints"));
     try std.testing.expectEqual(test_options.generate_strings, @hasDecl(runicode, "NamedStringMaps"));
 }
 
