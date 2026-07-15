@@ -35,6 +35,10 @@ test "kind-specific named maps resolve generated property maps with loose matchi
         const GraphemeBreakSets = runicode.NamedSetMaps.get("Grapheme Break Property").?;
         var grapheme_break_sets = GraphemeBreakSets{};
         try std.testing.expect((grapheme_break_sets.get("CN") orelse unreachable).equalTo(runicode.sets.GraphemeBreak.Control));
+
+        const WordBreakSets = runicode.NamedSetMaps.get("Word Break").?;
+        var word_break_sets = WordBreakSets{};
+        try std.testing.expect((word_break_sets.get("hebrewletter") orelse unreachable).equalTo(runicode.sets.WordBreak.Hebrew_Letter));
     }
 
     if (comptime test_options.generate_codepoints) {
@@ -57,6 +61,10 @@ test "character names resolve through loose-matching fst" {
     try std.testing.expectEqual(@as(?u21, 0x002D), names.get("hyphen minus"));
     try std.testing.expectEqual(@as(?u21, 0x000A), names.get("line_feed"));
     try std.testing.expectEqual(@as(?u21, 0x4E00), names.get("CJK Unified Ideograph-4E00"));
+    try std.testing.expectEqual(@as(?u21, 0x4E00), names.get("CJK Unified Ideograph4E00"));
+    try std.testing.expectEqual(@as(?u21, 0x008E), names.get("SINGLESHIFT2"));
+    try std.testing.expectEqual(@as(?u21, 0x0F60), names.get("TIBETAN LETTER-A"));
+    try std.testing.expectEqual(@as(?u21, 0x0F68), names.get("TIBETAN LETTER A"));
     try std.testing.expectEqual(@as(?u21, 0x1180), names.get("HANGUL JUNGSEONG O-E"));
     try std.testing.expectEqual(@as(?u21, 0x116C), names.get("HANGUL JUNGSEONG OE"));
 }

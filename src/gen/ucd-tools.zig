@@ -74,20 +74,11 @@ pub fn NamedMap(comptime Source: type) type {
 pub fn normalizePropName(name: []const u8, buf: []u8) ?usize {
     const start = prefixlessPropNameStart(name) orelse return null;
     var len: usize = 0;
-    var pending_sep = false;
 
     for (name[start..]) |byte| {
         switch (byte) {
-            ' ', '_', '-' => {
-                pending_sep = len != 0;
-            },
+            ' ', '_', '-' => {},
             'A'...'Z', 'a'...'z', '0'...'9' => {
-                if (pending_sep) {
-                    if (len == buf.len) return null;
-                    buf[len] = '_';
-                    len += 1;
-                    pending_sep = false;
-                }
                 if (len == buf.len) return null;
                 buf[len] = std.ascii.toLower(byte);
                 len += 1;
@@ -99,10 +90,18 @@ pub fn normalizePropName(name: []const u8, buf: []u8) ?usize {
     return len;
 }
 
-/// Perform loose Unicode normalization of a characater name.  This differs
+/// Perform loose Unicode normalization of a character name.  This differs
 /// from properties due to the existence of one oddball name which must be
 /// handled as an exception.
 pub fn normalizeCharacterName(name: []const u8, buf: []u8) ?usize {
+    return normalizeCharacterNameImpl(name, buf, false);
+}
+
+pub fn normalizeCharacterNamePreservingHyphens(name: []const u8, buf: []u8) ?usize {
+    return normalizeCharacterNameImpl(name, buf, true);
+}
+
+fn normalizeCharacterNameImpl(name: []const u8, buf: []u8, comptime preserve_hyphens: bool) ?usize {
     var len: usize = 0;
     var idx: usize = 0;
 
@@ -116,7 +115,7 @@ pub fn normalizeCharacterName(name: []const u8, buf: []u8) ?usize {
             },
             ' ', '_', '\t', '\n', '\r', 0x0b, 0x0c => {},
             '-' => {
-                if (isU1180NameHyphen(name, idx, buf[0..len])) {
+                if (preserve_hyphens or isU1180NameHyphen(name, idx, buf[0..len])) {
                     if (len == buf.len) return null;
                     buf[len] = '-';
                     len += 1;
@@ -191,7 +190,7 @@ fn isLoosePropNameSeparator(byte: u8) bool {
 
 fn isMedialNameHyphen(name: []const u8, hyphen_idx: usize) bool {
     if (hyphen_idx == 0 or hyphen_idx + 1 == name.len) return false;
-    return std.ascii.isAlphabetic(name[hyphen_idx - 1]) and std.ascii.isAlphabetic(name[hyphen_idx + 1]);
+    return std.ascii.isAlphanumeric(name[hyphen_idx - 1]) and std.ascii.isAlphanumeric(name[hyphen_idx + 1]);
 }
 
 fn isU1180NameHyphen(name: []const u8, hyphen_idx: usize, normalized_prefix: []const u8) bool {
@@ -675,12 +674,15 @@ pub fn propertyMap(io: std.Io, allocator: Allocator) !PropertyMap {
     return prop_map;
 }
 
-test "normalizePropName lowercases and collapses loose matching separators" {
+test "normalizePropName lowercases and removes loose matching separators" {
     var buf: [64]u8 = undefined;
 
     const len = normalizePropName("Script-Extensions", &buf).?;
 
-    try std.testing.expectEqualStrings("script_extensions", buf[0..len]);
+    try std.testing.expectEqualStrings("scriptextensions", buf[0..len]);
+
+    const hebrew_len = normalizePropName("Hebrew_Letter", &buf).?;
+    try std.testing.expectEqualStrings("hebrewletter", buf[0..hebrew_len]);
 }
 
 test "normalizePropName ignores a single initial is prefix" {
@@ -718,7 +720,10 @@ test "normalizeCharacterName follows UAX44-LM2 hyphen handling" {
     try std.testing.expectEqualStrings("hanguljungseongoeo", buf[0..u117f_len]);
 
     const cjk_len = normalizeCharacterName("CJK UNIFIED IDEOGRAPH-4E00", &buf).?;
-    try std.testing.expectEqualStrings("cjkunifiedideograph-4e00", buf[0..cjk_len]);
+    try std.testing.expectEqualStrings("cjkunifiedideograph4e00", buf[0..cjk_len]);
+
+    const alias_len = normalizeCharacterName("SINGLE-SHIFT-2", &buf).?;
+    try std.testing.expectEqualStrings("singleshift2", buf[0..alias_len]);
 
     const hyphen_len = normalizeCharacterName("HYPHEN-MINUS", &buf).?;
     try std.testing.expectEqualStrings("hyphenminus", buf[0..hyphen_len]);
@@ -788,6 +793,7 @@ test "NamedMap looks up array declarations as slices" {
 
     try std.testing.expectEqualSlices(u21, &TestCodepoints.Lu, map.get("Lu") orelse unreachable);
     try std.testing.expectEqualSlices(u21, &TestCodepoints.Lowercase_Letter, map.get("lowercase letter") orelse unreachable);
+    try std.testing.expectEqualSlices(u21, &TestCodepoints.Lowercase_Letter, map.get("lowercaseletter") orelse unreachable);
 }
 
 test "NamedMap looks up string declarations as slices" {

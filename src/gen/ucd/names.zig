@@ -162,8 +162,10 @@ fn writeCharacterNamesFile(io: std.Io, out_dir: std.Io.Dir, fst_bytes: []const u
         \\    buf: [128]u8 = undefined,
         \\
         \\    pub fn get(names: *CharacterNames, name: []const u8) ?u21 {
-        \\        const len = ucd_tools.normalizeCharacterName(name, &names.buf) orelse return null;
-        \\        const value = names.map.get(names.buf[0..len]) orelse return null;
+        \\        const preserved_len = ucd_tools.normalizeCharacterNamePreservingHyphens(name, &names.buf) orelse return null;
+        \\        if (names.map.get(names.buf[0..preserved_len])) |value| return @intCast(value);
+        \\        const normalized_len = ucd_tools.normalizeCharacterName(name, &names.buf) orelse return null;
+        \\        const value = names.map.get(names.buf[0..normalized_len]) orelse return null;
         \\        return @intCast(value);
         \\    }
         \\};
@@ -202,7 +204,7 @@ test "character name map includes aliases and derived name patterns" {
 
     const map = fysti.Map.init(fst_bytes.written());
     try map.verify();
-    try testing.expectEqual(@as(?u64, 0x4E00), map.get("cjkunifiedideograph-4e00"));
+    try testing.expectEqual(@as(?u64, 0x4E00), map.get("cjkunifiedideograph4e00"));
     try testing.expectEqual(@as(?u64, 0x000A), map.get("linefeed"));
 }
 
