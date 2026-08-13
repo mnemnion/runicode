@@ -4,7 +4,7 @@
     .fingerprint = 0xc58a229ada66d6bd,
 
     // This is a [Semantic Version](https://semver.org/).
-    .version = "0.1.1",
+    .version = "0.1.2",
 
     // This is currently advisory only; Zig does not yet do anything
     // with this value.
@@ -25,8 +25,8 @@
             .hash = "unicoder-0.1.0-f6uOBXhTAgBMIbLye6ovm2FTayJSvGjwoHL5gpOTGhQT",
         },
         .runeset = .{
-            .url = "https://github.com/mnemnion/runeset/archive/refs/tags/v0.9.5.tar.gz",
-            .hash = "runeset-0.9.4-XZ-DXQdBpAFfcawaMX9SRIYbunCFnj9YqjOUTfAAboKm",
+            .url = "https://github.com/mnemnion/runeset/archive/refs/tags/v0.10.0.tar.gz",
+            .hash = "runeset-0.10.0-XZ-DXcDmpAFuw_wHPq4FqjKeSnO3dVkIkGl2MbMcDMXw",
         },
         .memex = .{
             .url = "https://github.com/mnemnion/memex/archive/refs/tags/v0.1.0.tar.gz",
