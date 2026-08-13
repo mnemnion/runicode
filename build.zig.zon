@@ -4,7 +4,7 @@
     .fingerprint = 0xc58a229ada66d6bd,
 
     // This is a [Semantic Version](https://semver.org/).
-    .version = "0.0.0",
+    .version = "0.1.0",
 
     // This is currently advisory only; Zig does not yet do anything
     // with this value.
