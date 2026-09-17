@@ -68,7 +68,7 @@ pub fn jobs(allocator: std.mem.Allocator, entries: []const manifest.UcdFile) ![]
 
 fn emitsSetGroup(kind: manifest.FileKind) bool {
     return switch (kind) {
-        .codepoint_property, .script_extensions => true,
+        .codepoint_property, .script_extensions, .one_field_set, .derived_normalization_props, .bidi_brackets, .unikemet_sets => true,
         else => false,
     };
 }

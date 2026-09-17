@@ -851,6 +851,11 @@ fn semanticGroupSuffix(group_name: []const u8) ?[]const u8 {
 
 /// Returns the PropertyValueAliases namespace for a generated group.
 fn valueAliasProperty(group_name: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, group_name, "Bidi_Paired_Bracket_Type")) return "bpt";
+    if (std.mem.eql(u8, group_name, "NFC_Quick_Check")) return "NFC_QC";
+    if (std.mem.eql(u8, group_name, "NFD_Quick_Check")) return "NFD_QC";
+    if (std.mem.eql(u8, group_name, "NFKC_Quick_Check")) return "NFKC_QC";
+    if (std.mem.eql(u8, group_name, "NFKD_Quick_Check")) return "NFKD_QC";
     if (std.mem.eql(u8, group_name, "Blocks")) return "blk";
     if (std.mem.eql(u8, group_name, "GeneralCategory")) return "gc";
     if (std.mem.eql(u8, group_name, "GraphemeBreak")) return "GCB";
@@ -931,6 +936,11 @@ const RootAliasGroup = struct {
 };
 
 const root_alias_groups = [_]RootAliasGroup{
+    .{ .group = "Bidi_Paired_Bracket_Type", .property = "bpt" },
+    .{ .group = "NFC_Quick_Check", .property = "NFC_QC" },
+    .{ .group = "NFD_Quick_Check", .property = "NFD_QC" },
+    .{ .group = "NFKC_Quick_Check", .property = "NFKC_QC" },
+    .{ .group = "NFKD_Quick_Check", .property = "NFKD_QC" },
     .{ .group = "Age", .property = "age" },
     .{ .group = "BidiClass", .property = "bc" },
     .{ .group = "Blocks", .property = "blk" },

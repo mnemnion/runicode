@@ -87,6 +87,38 @@ test "disabled generated views are absent from the public root" {
     try std.testing.expectEqual(test_options.generate_strings, @hasDecl(runicode, "NamedStringMaps"));
 }
 
+test "explicit normalization bracket and Unikemet sets reach every enabled view" {
+    if (comptime test_options.generate_sets) {
+        try std.testing.expect(runicode.sets.Normalization.Composition_Exclusion.subsetOf(runicode.sets.Normalization.Full_Composition_Exclusion));
+        try std.testing.expect(runicode.sets.NFC_QC.No.equalTo(runicode.sets.NFC_Quick_Check.N));
+        try expectDisjoint(runicode.sets.NFC_QC.No, runicode.sets.NFC_QC.Maybe);
+        try expectDisjoint(runicode.sets.bpt.Open, runicode.sets.bpt.Close);
+        try std.testing.expectEqual(@as(usize, 4402), runicode.sets.Unikemet.Core.runeCount());
+        try std.testing.expectEqual(@as(usize, 97), runicode.sets.Unikemet.Legacy.runeCount());
+        try std.testing.expectEqual(@as(usize, 4), runicode.sets.Unikemet.kEH_NoMirror.runeCount());
+        try std.testing.expectEqual(@as(usize, 44), runicode.sets.Unikemet.kEH_NoRotate.runeCount());
+        inline for (.{ "NFC_QC", "NFD_QC", "NFKC_QC", "NFKD_QC" }) |property| {
+            try std.testing.expect(!@hasDecl(@field(runicode.sets, property), "Yes"));
+            try std.testing.expect(!@hasDecl(@field(runicode.sets, property), "Y"));
+        }
+        try std.testing.expect(!@hasDecl(runicode.sets.bpt, "None"));
+        try std.testing.expect(!@hasDecl(runicode.sets.Unikemet, "None"));
+        const Brackets = runicode.NamedSetMaps.get("bpt").?;
+        var brackets = Brackets{};
+        try std.testing.expect(brackets.get("o").?.equalTo(runicode.sets.bpt.Open));
+    }
+    if (comptime test_options.generate_codepoints) {
+        try std.testing.expectEqual(@as(u21, 0x28), runicode.codepoints.bpt.Open[0]);
+        try std.testing.expectEqual(@as(usize, 4), runicode.codepoints.Unikemet.kEH_NoMirror.len);
+        try std.testing.expect(runicode.codepoints.NFC_QC.Maybe.len > 0);
+    }
+    if (comptime test_options.generate_strings) {
+        try std.testing.expect(std.mem.startsWith(u8, runicode.strs.bpt.Open, "("));
+        try std.testing.expect(runicode.strs.Unikemet.Core.len > 0);
+        try std.testing.expect(runicode.strs.NFC_QC.Maybe.len > 0);
+    }
+}
+
 fn expectDisjoint(left: anytype, right: anytype) !void {
     const intersection = try left.setIntersection(right, std.testing.allocator);
     defer intersection.deinit(std.testing.allocator);

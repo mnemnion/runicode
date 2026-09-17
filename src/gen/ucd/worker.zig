@@ -189,9 +189,85 @@ fn readEntry(
 ) !void {
     switch (entry.kind) {
         .codepoint_property => try readCodepointPropertyFile(io, ucd_dir, db, aliases, entry),
+        .one_field_set, .derived_normalization_props, .bidi_brackets, .unikemet_sets => try readExplicitSetFile(io, ucd_dir, db, aliases, entry),
         else => return error.UnsupportedWorkerEntry,
     }
 }
+
+fn readExplicitSetFile(
+    io: std.Io,
+    ucd_dir: std.Io.Dir,
+    db: *Db,
+    aliases: *const Aliases,
+    entry: manifest.UcdFile,
+) !void {
+    var file = try ucd_dir.openFile(io, entry.path, .{});
+    defer file.close(io);
+    var buf: [4096]u8 = undefined;
+    var reader = file.reader(io, &buf);
+    while (try reader.interface.takeDelimiter('\n')) |line| {
+        if (entry.kind == .unikemet_sets) {
+            var fields = std.mem.splitScalar(u8, std.mem.trim(u8, line, "\r"), '\t');
+            const codepoint = fields.next() orelse continue;
+            if (!std.mem.startsWith(u8, codepoint, "U+")) continue;
+            const property = fields.next() orelse return error.InvalidUnikemetLine;
+            const value = fields.next() orelse return error.InvalidUnikemetLine;
+            const member = if (std.mem.eql(u8, property, "kEH_Core"))
+                if (std.mem.eql(u8, value, "C")) "Core" else if (std.mem.eql(u8, value, "L")) "Legacy" else continue
+            else if (std.mem.eql(u8, property, "kEH_NoMirror") or std.mem.eql(u8, property, "kEH_NoRotate"))
+                if (std.mem.eql(u8, value, "Y")) property else continue
+            else
+                continue;
+            try db.addRange("Unikemet", member, try parse.parseCodepointRange(codepoint[2..]));
+            continue;
+        }
+
+        var storage: [3][]const u8 = undefined;
+        const fields = try parse.fieldsBounded(line, &storage);
+        if (fields.len == 0) continue;
+        const range = try parse.parseCodepointRange(fields[0]);
+        switch (entry.kind) {
+            .one_field_set => {
+                if (fields.len != 1) return error.InvalidOneFieldSetLine;
+                try db.addRange("Normalization", "Composition_Exclusion", range);
+            },
+            .bidi_brackets => {
+                if (fields.len != 3) return error.InvalidBidiBracketsLine;
+                const value = if (std.mem.eql(u8, fields[2], "o")) "Open" else if (std.mem.eql(u8, fields[2], "c")) "Close" else continue;
+                try db.addRange("Bidi_Paired_Bracket_Type", value, range);
+            },
+            .derived_normalization_props => {
+                if (fields.len < 2) return error.InvalidNormalizationLine;
+                if (normalization_flags.has(fields[1])) {
+                    const property = aliases.canonicalProperty(fields[1]) orelse fields[1];
+                    try db.addRange("Normalization", property, range);
+                } else if (normalization_checks.has(fields[1])) {
+                    if (fields.len != 3) return error.InvalidNormalizationLine;
+                    const value = if (std.mem.eql(u8, fields[2], "N")) "No" else if (std.mem.eql(u8, fields[2], "M")) "Maybe" else continue;
+                    const property = aliases.canonicalProperty(fields[1]) orelse fields[1];
+                    try db.addRange(property, value, range);
+                }
+            },
+            else => unreachable,
+        }
+    }
+}
+
+const normalization_flags = std.StaticStringMap(void).initComptime(.{
+    .{ "Full_Composition_Exclusion", {} },
+    .{ "Changes_When_NFKC_Casefolded", {} },
+    .{ "Expands_On_NFC", {} },
+    .{ "Expands_On_NFD", {} },
+    .{ "Expands_On_NFKC", {} },
+    .{ "Expands_On_NFKD", {} },
+});
+
+const normalization_checks = std.StaticStringMap(void).initComptime(.{
+    .{ "NFC_QC", {} },
+    .{ "NFD_QC", {} },
+    .{ "NFKC_QC", {} },
+    .{ "NFKD_QC", {} },
+});
 
 fn readScriptsBundle(
     io: std.Io,
@@ -382,6 +458,49 @@ fn makeFixtureAliases(allocator: std.mem.Allocator) !Aliases {
     }) |line| try aliases.loadPropertyValueLine(line);
 
     return aliases;
+}
+
+test "explicit set readers select membership without defaults or mappings" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "CompositionExclusions.txt", .data = "0958 # exclusion\n" });
+    try tmp.dir.writeFile(testing.io, .{
+        .sub_path = "DerivedNormalizationProps.txt",
+        .data = "0340..0341; Full_Composition_Exclusion\n0041; Changes_When_NFKC_Casefolded\n0340; NFC_QC; N\n0300; NFC_QC; M\n0041; NFC_QC; Y\n0041; NFKC_CF; 0061\n00AD; NFKC_CF;\n",
+    });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "BidiBrackets.txt", .data = "0028; 0029; o\n0029; 0028; c\n0041; 0041; n\n" });
+    try tmp.dir.writeFile(testing.io, .{
+        .sub_path = "Unikemet.txt",
+        .data = "U+13000\tkEH_Core\tC\nU+13001\tkEH_Core\tL\nU+13002\tkEH_Core\tN\nU+13003\tkEH_NoMirror\tY\nU+13004\tkEH_NoRotate\tY\nU+13005\tkEH_NoMirror\tN\nU+13006\tkEH_Desc\tDescription\n",
+    });
+    var aliases = Aliases.init(testing.allocator);
+    defer aliases.deinit();
+    try aliases.loadPropertyLine("NFC_QC; NFC_Quick_Check");
+    var db = Db.init(testing.allocator);
+    defer db.deinit();
+    inline for (.{ "CompositionExclusions.txt", "DerivedNormalizationProps.txt", "BidiBrackets.txt", "Unikemet.txt" }) |path| {
+        try readEntry(testing.io, tmp.dir, &db, &aliases, manifest.entryFor(path).?);
+    }
+    try db.finalizeRuneSets();
+    try testing.expectEqual(@as(usize, 4), db.groups.count());
+    const normalization = db.property("Normalization").?;
+    try testing.expectEqual(@as(usize, 3), normalization.values.count());
+    try testing.expectEqual(@as(usize, 2), normalization.value("Full_Composition_Exclusion").?.rune_set.?.runeCount());
+    try testing.expectEqual(@as(u21, 0x958), normalization.value("Composition_Exclusion").?.ranges.items[0].first);
+    const quick = db.property("NFC_Quick_Check").?;
+    try testing.expectEqual(@as(usize, 2), quick.values.count());
+    try testing.expectEqual(@as(u21, 0x340), quick.value("No").?.ranges.items[0].first);
+    try testing.expectEqual(@as(u21, 0x300), quick.value("Maybe").?.ranges.items[0].first);
+    const brackets = db.property("Bidi_Paired_Bracket_Type").?;
+    try testing.expectEqual(@as(usize, 2), brackets.values.count());
+    try testing.expectEqual(@as(u21, 0x28), brackets.value("Open").?.ranges.items[0].first);
+    try testing.expectEqual(@as(u21, 0x29), brackets.value("Close").?.ranges.items[0].first);
+    const egyptian = db.property("Unikemet").?;
+    try testing.expectEqual(@as(usize, 4), egyptian.values.count());
+    inline for (.{ "Core", "Legacy", "kEH_NoMirror", "kEH_NoRotate" }, .{ 0x13000, 0x13001, 0x13003, 0x13004 }) |value, codepoint| {
+        try testing.expectEqual(@as(usize, 1), egyptian.value(value).?.rune_set.?.runeCount());
+        try testing.expectEqual(@as(u21, codepoint), egyptian.value(value).?.ranges.items[0].first);
+    }
 }
 
 test "runJob emits one simple property namespace" {
