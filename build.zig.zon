@@ -8,7 +8,7 @@
 
     // This is currently advisory only; Zig does not yet do anything
     // with this value.
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.1",
 
     // This field is optional.
     // Each dependency must either provide a `url` and `hash`, or a `path`.
@@ -17,20 +17,20 @@
     // internet connectivity.
     .dependencies = .{
         .ezcaper = .{
-            .url = "https://github.com/mnemnion/ezcaper/archive/refs/tags/v0.3.0.tar.gz",
-            .hash = "ezcaper-0.3.0-kd9_icCWAAAgzriNtlOgV8G5sBmD9nr8mnmo4zFNQQiq",
+            .url = "https://github.com/mnemnion/ezcaper/archive/refs/tags/v0.3.3.tar.gz",
+            .hash = "ezcaper-0.3.3-kd9_iVOXAACeb32PbDTf0DBbYCfrI9qXbwW5ayQzbpTM",
         },
         .unicoder = .{
-            .url = "https://github.com/mnemnion/unicoder/archive/refs/tags/v0.1.0.tar.gz",
-            .hash = "unicoder-0.1.0-f6uOBXhTAgBMIbLye6ovm2FTayJSvGjwoHL5gpOTGhQT",
+            .url = "https://github.com/mnemnion/unicoder/archive/refs/tags/v0.2.1.tar.gz",
+            .hash = "unicoder-0.2.1-f6uOBX5uAgBvJqB0XGpW0_o_J5k27H-P7v65hsUDO1P8",
         },
         .runeset = .{
-            .url = "https://github.com/mnemnion/runeset/archive/refs/tags/v0.10.1.tar.gz",
-            .hash = "runeset-0.10.0-XZ-DXSnopAF6g4tox5fU7H7aajdkHGK9gv-BybdPpa0s",
+            .url = "https://github.com/mnemnion/runeset/archive/refs/tags/v0.10.2.tar.gz",
+            .hash = "runeset-0.10.2-XZ-DXY5opQErblHiwFbAhS0yKRniHKqFZiEK8usak1D3",
         },
         .memex = .{
-            .url = "https://github.com/mnemnion/memex/archive/refs/tags/v0.1.0.tar.gz",
-            .hash = "memex-0.1.0-L7-4abTJAQDqjdWxl1Fu6WsMlXyhvBcrUGAbAM2vIzQL",
+            .url = "https://github.com/mnemnion/memex/archive/refs/tags/v0.1.2.tar.gz",
+            .hash = "memex-0.1.2-L7-4ad0UAgDCq4IQJZ-4Vme1L0rBlCO_EuqjJ5yuicgJ",
         },
     },
     .paths = .{

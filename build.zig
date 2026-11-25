@@ -76,7 +76,18 @@ pub fn build(b: *std.Build) void {
         .install_subdir = "",
         .exclude_extensions = &.{".DS_Store"},
     });
-    install_generated_code.step.dependOn(&CleanInstallDir.create(b, .{ .custom = "gen" }, "").step);
+    const clean_install = b.addExecutable(.{
+        .name = "clean-install",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/gen/clean-install.zig"),
+            .target = b.graph.host,
+            .optimize = optimize,
+        }),
+    });
+    const run_clean_install = b.addRunArtifact(clean_install);
+    run_clean_install.addDirectoryArg2(.{ .relative = .{ .base = .install_prefix, .sub_path = "gen" } }, .{});
+    run_clean_install.has_side_effects = true;
+    install_generated_code.step.dependOn(&run_clean_install.step);
 
     const run_runicode_gen_step = b.step("gen-runicode", "audit bundled Unicode data files");
 
@@ -138,35 +149,3 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_gen_unit_tests.step);
     test_step.dependOn(&run_runicode_api_tests.step);
 }
-
-const CleanInstallDir = struct {
-    step: std.Build.Step,
-    install_dir: std.Build.InstallDir,
-    install_subdir: []const u8,
-
-    fn create(b: *std.Build, install_dir: std.Build.InstallDir, install_subdir: []const u8) *CleanInstallDir {
-        const clean = b.allocator.create(CleanInstallDir) catch @panic("OOM");
-        clean.* = .{
-            .step = std.Build.Step.init(.{
-                .id = .custom,
-                .name = b.fmt("clean install {s}/", .{install_subdir}),
-                .owner = b,
-                .makeFn = make,
-            }),
-            .install_dir = install_dir.dupe(b),
-            .install_subdir = b.dupe(install_subdir),
-        };
-        return clean;
-    }
-
-    fn make(step: *std.Build.Step, options: std.Build.Step.MakeOptions) !void {
-        _ = options;
-        const clean: *CleanInstallDir = @fieldParentPtr("step", step);
-        const b = step.owner;
-        const io = b.graph.io;
-        const dest = b.getInstallPath(clean.install_dir, clean.install_subdir);
-        std.Io.Dir.cwd().deleteTree(io, dest) catch |err| {
-            return step.fail("unable to remove install directory '{s}': {t}", .{ dest, err });
-        };
-    }
-};

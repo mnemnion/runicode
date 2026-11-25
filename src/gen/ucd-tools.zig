@@ -26,16 +26,16 @@ pub fn NamedMap(comptime Source: type) type {
 
         @setEvalBranchQuota(evalBranchQuota(decls.len));
 
-        const First = @TypeOf(@field(Source, decls[0].name));
+        const First = @TypeOf(@field(Source, decls[0]));
         const Value = mapValueType(First);
 
         var key_bufs: [decls.len][128]u8 = undefined;
         var key_lens: [decls.len]usize = undefined;
         var values: [decls.len]Value = undefined;
         for (decls, 0..) |decl, idx| {
-            const value = @field(Source, decl.name);
-            const len = normalizePropName(decl.name, &key_bufs[idx]) orelse {
-                @compileError("declaration name cannot be normalized: " ++ decl.name);
+            const value = @field(Source, decl);
+            const len = normalizePropName(decl, &key_bufs[idx]) orelse {
+                @compileError("declaration name cannot be normalized: " ++ decl);
             };
             key_lens[idx] = len;
             values[idx] = mapValue(value, Value);
@@ -154,12 +154,12 @@ fn mapValue(comptime value: anytype, comptime Value: type) Value {
     };
 }
 
-fn sourceDecls(comptime Source: type) []const std.builtin.Type.Declaration {
+fn sourceDecls(comptime Source: type) []const [:0]const u8 {
     const source_info = @typeInfo(Source);
     if (source_info != .@"struct") {
         @compileError("NamedMap requires a struct or namespace type");
     }
-    return source_info.@"struct".decls;
+    return source_info.@"struct".decl_names;
 }
 
 fn evalBranchQuota(comptime decl_count: usize) u32 {
